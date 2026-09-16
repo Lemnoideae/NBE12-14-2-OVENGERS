@@ -170,6 +170,7 @@ class AdminSpaceServiceTest {
                 assertThat(response.capacity()).isEqualTo(8);
                 assertThat(response.pricePerSlot()).isEqualTo(4000L);
                 assertThat(response.status()).isEqualTo(SpaceStatus.INACTIVE);
+                assertThat(response.version()).isEqualTo(1);
 
                 // 감사 로그 호출 검증
                 verify(auditLogService).log(
@@ -179,6 +180,49 @@ class AdminSpaceServiceTest {
                                 eq(spaceId),
                                 any(SpaceDetailResponse.class),
                                 any(SpaceDetailResponse.class));
+        }
+
+        @Test
+        @DisplayName("가격이 변경되지 않는 공간 수정 시 version은 증가하지 않는다")
+        void updateSpace_priceUnchanged_versionNotIncremented() {
+                // given
+                Long spaceId = 1L;
+                Long adminMemberId = 100L;
+
+                Space existingSpace = Space.builder()
+                                .id(spaceId)
+                                .name("이전 공간명")
+                                .location("이전 위치")
+                                .description("이전 설명")
+                                .capacity(4)
+                                .pricePerSlot(3000L)
+                                .openingTime(LocalTime.of(9, 0))
+                                .closingTime(LocalTime.of(18, 0))
+                                .status(SpaceStatus.ACTIVE)
+                                .version(0)
+                                .build();
+
+                SpaceUpdateRequest updateRequest = new SpaceUpdateRequest(
+                                null,
+                                "새 공간명만 변경",
+                                null,
+                                null,
+                                null,
+                                3000L, // 기존과 동일한 가격
+                                null,
+                                null,
+                                null,
+                                null);
+
+                given(spaceRepository.findById(spaceId)).willReturn(Optional.of(existingSpace));
+
+                // when
+                SpaceDetailResponse response = adminSpaceService.updateSpace(spaceId, updateRequest, adminMemberId);
+
+                // then
+                assertThat(response.name()).isEqualTo("새 공간명만 변경");
+                assertThat(response.pricePerSlot()).isEqualTo(3000L);
+                assertThat(response.version()).isEqualTo(0);
         }
 
         @Test
