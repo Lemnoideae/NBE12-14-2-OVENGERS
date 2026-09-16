@@ -1,12 +1,13 @@
 package com.ovengers.slotkey.audit.service;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-import com.ovengers.slotkey.audit.entity.AuditAction;
-import com.ovengers.slotkey.audit.entity.AuditLog;
-import com.ovengers.slotkey.audit.entity.AuditTargetType;
-import com.ovengers.slotkey.audit.repository.AuditLogRepository;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+
+import java.util.Map;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -15,13 +16,13 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.util.Map;
-
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.BDDMockito.given;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.ovengers.slotkey.audit.entity.AuditAction;
+import com.ovengers.slotkey.audit.entity.AuditLog;
+import com.ovengers.slotkey.audit.entity.AuditTargetType;
+import com.ovengers.slotkey.audit.repository.AuditLogRepository;
 
 @ExtendWith(MockitoExtension.class)
 class AuditLogServiceTest {
