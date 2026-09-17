@@ -1,4 +1,119 @@
 package com.ovengers.slotkey.space.entity;
 
+import com.ovengers.slotkey.global.error.BusinessException;
+import com.ovengers.slotkey.global.error.ErrorCode;
+import com.ovengers.slotkey.space.dto.request.SpaceUpdateRequest;
+import jakarta.persistence.*;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+
+import java.time.LocalTime;
+
+@Entity
+// 2026-09-15 수정(이태호): 테이블명이 V2 마이그레이션에서 spaces(복수) -> space(단수)로
+// 정정됐는데 엔티티 매핑은 그대로 남아 있어 실제 스키마와 어긋나 있었다(연결된 채로는 부팅 시 테이블을
+// 찾지 못한다). DDL(V2)과 맞춰 단수로 정정.
+@Table(name = "spaces")
+@Builder
+@Getter
+@NoArgsConstructor
+@AllArgsConstructor
 public class Space {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id; // PK, 고유 식별자
+
+    @Column(nullable = false, length = 100)
+    private String name; // 공간 이름
+
+    @Column(nullable = false)
+    private String location; // 공간의 위치 or 지역명
+
+    @Column(columnDefinition = "TEXT")
+    private String description; // 공간 상세 소개
+
+    @Column(nullable = false)
+    private Integer capacity; // 공간 최대 수용 인원
+
+    @Column(nullable = false, name = "price_per_slot")
+    private Long pricePerSlot; // 공간의 슬롯 당 고정 이용 요금 (100원 단위)
+
+    @Column(length = 500, name = "image_path")
+    private String imagePath; // 대표 이미지 저장 경로
+
+    @Column(nullable = false, name = "opening_time")
+    private LocalTime openingTime; // 일일 운영 시작 시각
+
+    @Column(nullable = false, name = "closing_time")
+    private LocalTime closingTime; // 일일 운영 종료 시각
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private SpaceStatus status; // 신규 예약 접수 가능 여부
+
+    // 2026-09-15 추가(이태호, core-domain-decisions.md core-domain-decisions 5-2/§11): DDL(V2)에는 이미 있었으나
+    // 엔티티 매핑이 빠져 있던 낙관적 비교용 버전. HOLD 응답에 실어 보냈다가 결제 확인(pay) 시
+    // 되돌려받아 비교한다 — 가격 값이 아니라 이 값으로 비교해야 ABA 문제를 피할 수 있다.
+    // int(참조형 아님)로 둔 이유: 이미 있는 Space.builder() 호출부(SpaceCreateRequest.toEntity() 등)가
+    // version을 명시적으로 채우지 않아도 NULL이 아니라 0이 들어가 NOT NULL 제약을 통과한다.
+    @Column(nullable = false)
+    private int version;
+
+    public static void validateOperatingHours(LocalTime openingTime, LocalTime closingTime) {
+        if (openingTime == null || closingTime == null || !openingTime.isBefore(closingTime)) {
+            throw new BusinessException(ErrorCode.INVALID_OPERATING_HOURS);
+        }
+    }
+
+    public static void validatePricePerSlot(Long pricePerSlot) {
+        if (pricePerSlot == null || pricePerSlot <= 0 || pricePerSlot % 100 != 0) {
+            throw new BusinessException(ErrorCode.INVALID_PRICE_UNIT);
+        }
+    }
+
+    public void updateDetail(SpaceUpdateRequest request) {
+        if (request.name() != null) {
+            this.name = request.name();
+        }
+        if (request.location() != null) {
+            this.location = request.location();
+        }
+        if (request.description() != null) {
+            this.description = request.description();
+        }
+        if (request.capacity() != null) {
+            this.capacity = request.capacity();
+        }
+        if (request.pricePerSlot() != null) {
+            validatePricePerSlot(request.pricePerSlot());
+            if (!request.pricePerSlot().equals(this.pricePerSlot)) {
+                this.version++;
+            }
+            this.pricePerSlot = request.pricePerSlot();
+        }
+        if (request.imagePath() != null) {
+            this.imagePath = request.imagePath();
+        }
+        if (request.openingTime() != null && request.closingTime() != null) {
+            validateOperatingHours(request.openingTime(), request.closingTime());
+            this.openingTime = request.openingTime();
+            this.closingTime = request.closingTime();
+        } else if (request.openingTime() != null) {
+            validateOperatingHours(request.openingTime(), this.closingTime);
+            this.openingTime = request.openingTime();
+        } else if (request.closingTime() != null) {
+            validateOperatingHours(this.openingTime, request.closingTime());
+            this.closingTime = request.closingTime();
+        }
+        if (request.status() != null) {
+            this.status = request.status();
+        }
+    }
+
+    public void updateStatus(SpaceStatus status) {
+        this.status = status;
+    }
 }
