@@ -28,8 +28,8 @@ public class AdminSpaceController {
 
     @GetMapping("/spaces")
     public ResponseEntity<ApiResponse<PageResponse<SpaceDetailResponse>>> getSpaces(
-            @RequestParam(required = false) SpaceStatus status,
-            @RequestParam(required = false) String keyword,
+            @RequestParam(name = "status", required = false) SpaceStatus status,
+            @RequestParam(name = "keyword", required = false) String keyword,
             @PageableDefault(size = 20) Pageable pageable) {
         PageResponse<SpaceDetailResponse> response =
                 PageResponse.from(adminSpaceService.getSpaces(status, keyword, pageable));
