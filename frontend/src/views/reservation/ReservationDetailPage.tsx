@@ -202,7 +202,7 @@ const endsAt = new Date(`${reservation.endTime}+09:00`);
         <aside className="sticky">
           <>
               <AccessKeyPanel
-                accessKey={issuedKey?.accessKey}
+                accessKey={issuedKey?.token}
                 issuedAt={issuedKey?.issuedAt}
                 notice={
                   canIssueKey
