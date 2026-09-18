@@ -195,7 +195,7 @@ const endsAt = new Date(`${reservation.endTime}+09:00`);
 
           <section className="section">
             <h2>예약 타임라인</h2>
-            <ReservationStatusHistory histories={reservation.statusHistories} />
+            <ReservationStatusHistory histories={reservation.statusHistory} />
 
           </section>
         </div>

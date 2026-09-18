@@ -55,10 +55,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (credentials: LoginRequest): Promise<Member> => {
     const data = await authApi.login(credentials);
-    const me = data.member ?? (await getMe());
-    setMember(me);
-    return me;
-  }, []);
+    try {
+      const me = data.member ?? (await getMe());
+      setMember(me);
+      return me;
+    } catch (error) {
+      clearSession();
+      throw error;
+    }
+  }, [clearSession]);
 
   const signup = useCallback(
     async (form: SignupRequest): Promise<Member> => {
