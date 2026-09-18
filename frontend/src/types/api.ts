@@ -124,6 +124,7 @@ export interface DecoratedSlot extends SlotAvailability {
 }
 
 export interface SpaceSlotsResponse {
+  spaceId: number;
   date: string;
   slots: SlotAvailability[];
 }
@@ -141,13 +142,14 @@ export type ReservationStatus =
   | 'NO_SHOW';
 
 export interface StatusHistory {
-  id: number;
+  id?: number;
   fromStatus: ReservationStatus | null;
   toStatus: ReservationStatus;
   /** 없으면 스케줄러가 처리한 것입니다. */
-  actorNickname: string | null;
+  actorNickname?: string | null;
   reason: string | null;
-  createdAt: string;
+  changedAt: string;
+  createdAt?: string;
 }
 
 export interface ReservationSummary {

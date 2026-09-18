@@ -149,10 +149,12 @@ async function send<T>(
 /* ------------------------------------------------------- 토큰 재발급 */
 
 let refreshPromise: Promise<boolean> | null = null;
+let lastRefreshError: ApiError | null = null;
 
 async function refreshAccessToken(): Promise<boolean> {
   // 동시에 여러 요청이 401 을 받아도 재발급은 한 번만 수행합니다.
   if (!refreshPromise) {
+    lastRefreshError = null;
     refreshPromise = send<AuthTokens>('POST', API_ROUTES.auth.refresh, {
       auth: false,
     })
@@ -160,8 +162,16 @@ async function refreshAccessToken(): Promise<boolean> {
         setTokens({ accessToken: data.accessToken });
         return true;
       })
-      .catch(() => {
+      .catch((error) => {
         clearTokens();
+        lastRefreshError =
+          error instanceof ApiError
+            ? error
+            : new ApiError({
+                code: ERROR_CODE.INVALID_REFRESH_TOKEN,
+                status: 401,
+                message: error instanceof Error ? error.message : String(error),
+              });
         return false;
       })
       .finally(() => {
@@ -181,9 +191,18 @@ async function request<T>(method: string, path: string, options: SendOptions = {
     const refreshed = await refreshAccessToken();
     if (!refreshed) {
       onUnauthorized?.();
-      throw error;
+      throw lastRefreshError ?? error;
     }
-    return send<T>(method, path, options);
+
+    try {
+      return await send<T>(method, path, options);
+    } catch (retryError) {
+      if (retryError instanceof ApiError && retryError.status === 401) {
+        clearTokens();
+        onUnauthorized?.();
+      }
+      throw retryError;
+    }
   }
 }
 
