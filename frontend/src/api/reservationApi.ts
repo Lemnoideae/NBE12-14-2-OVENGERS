@@ -105,6 +105,8 @@ export async function getMyReservation(reservationId: number | string) {
     spaceName: space.name,
     spaceLocation: space.location,
     spaceImagePath: space.imagePath,
+    spaceType: null as string | null,
+    partySize: null as number | null,
   };
 }
 
