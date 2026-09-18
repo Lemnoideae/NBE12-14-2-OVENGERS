@@ -55,19 +55,13 @@ public class DoorAccessVerificationService {
         Space requestedSpace = spaceRepository.findById(request.getSpaceId())
                 .orElse(null);
 
-        DoorAccessToken accessToken;
+        DoorAccessToken accessToken =
+                doorAccessTokenService.findOptionalByRawToken(
+                                request.getToken()
+                        )
+                        .orElse(null);
 
-        try {
-            accessToken =
-                    doorAccessTokenService.findByRawToken(
-                            request.getToken()
-                    );
-        } catch (BusinessException exception) {
-            if (exception.getErrorCode()
-                    != ErrorCode.ACCESS_TOKEN_NOT_FOUND) {
-                throw exception;
-            }
-
+        if (accessToken == null) {
             return deny(
                     actorMember,
                     null,

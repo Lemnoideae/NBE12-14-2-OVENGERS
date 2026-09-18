@@ -38,7 +38,7 @@ export default function DoorTerminalPage() {
   const { execute, loading, error, setError } = useAction(async () => {
     setResult(null);
     const response = await verifyAccess({
-      token: form.accessKey ?? '',
+      token: (form.accessKey ?? '').replace(/\s/g, ''),
       spaceId: Number(form.spaceId),
     });
     setResult(response);
