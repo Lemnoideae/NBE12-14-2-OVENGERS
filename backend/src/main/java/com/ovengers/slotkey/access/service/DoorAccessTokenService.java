@@ -97,6 +97,8 @@ public class DoorAccessTokenService {
                         )
                 );
 
+        doorAccessTokenRepository.flush();
+
         // 새로운 원문 토큰 생성
         String rawToken =
                 accessTokenGenerator.generate();
