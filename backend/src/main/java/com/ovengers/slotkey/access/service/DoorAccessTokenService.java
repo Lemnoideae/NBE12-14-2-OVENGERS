@@ -35,9 +35,8 @@ public class DoorAccessTokenService {
     private final AccessTokenHasher accessTokenHasher;
     private final Clock clock;
 
-    // 새로운 출입 토큰 생성
-    @Transactional
-    public DoorAccessToken create(
+    // 새로운 출입 토큰 생성 (issue 내부 전용)
+    private DoorAccessToken create(
             Reservation reservation,
             String tokenHash,
             LocalDateTime issuedAt
@@ -57,7 +56,7 @@ public class DoorAccessTokenService {
             Long loginMemberId,
             Long reservationId
     ) {
-        Reservation reservation = reservationRepository.findById(reservationId)
+        Reservation reservation = reservationRepository.findByIdForUpdate(reservationId)
                 .orElseThrow(() -> new BusinessException(
                         ErrorCode.RESERVATION_NOT_FOUND
                 ));
@@ -90,8 +89,8 @@ public class DoorAccessTokenService {
             );
         }
 
-        // 기존 활성 토큰이 있으면 먼저 폐기
-        doorAccessTokenRepository.findByReservationIdAndRevokedAtIsNull(reservationId)
+        // Reservation -> DoorAccessToken 잠금 순서에 따라 활성 토큰 비관적 락 조회 후 폐기
+        doorAccessTokenRepository.findByReservationIdAndRevokedAtIsNullForUpdate(reservationId)
                 .ifPresent(activeToken ->
                         activeToken.revoke(
                                 issuedAt,
@@ -177,9 +176,9 @@ public class DoorAccessTokenService {
         return doorAccessTokenRepository.findAll();
     }
 
-    // 출입 토큰 ID로 폐기
+    // 출입 토큰 ID로 폐기 (내부 패키지 전용, 외부 우회 방지)
     @Transactional
-    public DoorAccessToken revoke(
+    DoorAccessToken revoke(
             Long tokenId,
             LocalDateTime revokedAt,
             String revokeReason
@@ -203,7 +202,7 @@ public class DoorAccessTokenService {
             LocalDateTime revokedAt,
             String revokeReason
     ) {
-        Reservation reservation = reservationRepository.findById(reservationId)
+        Reservation reservation = reservationRepository.findByIdForUpdate(reservationId)
                 .orElseThrow(() -> new BusinessException(
                         ErrorCode.RESERVATION_NOT_FOUND
                 ));
@@ -213,8 +212,11 @@ public class DoorAccessTokenService {
                 reservation.getMemberId()
         );
 
-        DoorAccessToken token =
-                findActiveByReservationId(reservationId);
+        DoorAccessToken token = doorAccessTokenRepository
+                .findByReservationIdAndRevokedAtIsNullForUpdate(reservationId)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.ACTIVE_ACCESS_TOKEN_NOT_FOUND
+                ));
 
         token.revoke(
                 revokedAt,
@@ -222,7 +224,14 @@ public class DoorAccessTokenService {
         );
     }
 
-    // 예약 상태 변경에 따른 활성 출입 토큰 폐기
+    /**
+     * 예약 상태 변경에 따른 활성 출입 토큰 폐기 (시스템 내부 경로).
+     *
+     * [잠금 계약 주의]
+     * 본 메서드는 호출자(AdminReservationService.forceCancel, ReservationBatchProcessor 등)가
+     * 동일 트랜잭션 내에서 사전에 Reservation 상태 전이(조건부 UPDATE)로 인한 Reservation 행 배타적 잠금(X-Lock)을
+     * 이미 획득한 상태에서 호출되어야 한다. 이를 통해 Reservation -> DoorAccessToken 잠금 순서를 일관되게 보장한다.
+     */
     @Transactional
     public void revokeByReservation(
             Long reservationId,
@@ -230,7 +239,7 @@ public class DoorAccessTokenService {
             String revokeReason
     ) {
         doorAccessTokenRepository
-                .findByReservationIdAndRevokedAtIsNull(
+                .findByReservationIdAndRevokedAtIsNullForUpdate(
                         reservationId
                 )
                 .ifPresent(token ->
