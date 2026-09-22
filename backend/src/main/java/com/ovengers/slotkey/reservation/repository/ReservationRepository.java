@@ -72,6 +72,20 @@ public interface ReservationRepository extends JpaRepository<Reservation, Long> 
             @Param("cancelled") ReservationStatus cancelled
     );
 
+    /**
+     * 최초 체크인의 문지기. CONFIRMED일 때만 IN_USE로 전이하고 checked_in_at을 기록한다.
+     * 영향 행이 0이면 이미 체크인되었거나, 강제 취소/취소/노쇼 등으로 상태가 변경된 것이다.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("UPDATE Reservation r SET r.status = :inUse, r.checkedInAt = :now " +
+            "WHERE r.id = :id AND r.status = :confirmed")
+    int checkInIfConfirmed(
+            @Param("id") Long id,
+            @Param("now") LocalDateTime now,
+            @Param("confirmed") ReservationStatus confirmed,
+            @Param("inUse") ReservationStatus inUse
+    );
+
     /** 체크아웃/자동 퇴실의 문지기(core-domain-decisions 8-4). IN_USE일 때만 COMPLETED로 전이한다. */
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("UPDATE Reservation r SET r.status = :completed, r.checkedOutAt = :checkedOutAt " +
