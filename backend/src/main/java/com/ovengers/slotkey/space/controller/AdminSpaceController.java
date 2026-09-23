@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -109,7 +110,7 @@ public class AdminSpaceController {
                 새로운 공간을 등록합니다.
                 슬롯당 요금은 100원 이상이며 100원 단위여야 합니다.
                 운영 종료 시각은 운영 시작 시각보다 늦어야 합니다.
-                imagePath에는 이미지 주소를 입력합니다. 파일 업로드 API가 아닙니다.
+                공간 대표 사진은 imagePath로 직접 입력하지 않고, 공간 등록 성공 후 반환된 data.id(spaceId)를 사용하여 별도 사진 업로드 API(PUT /api/v1/admin/spaces/{spaceId}/image)로 등록합니다. imagePath는 비워두어야 합니다.
                 """
     )
     @ApiResponses({
@@ -143,6 +144,7 @@ public class AdminSpaceController {
                 경로의 spaceId에 해당하는 공간 정보를 수정합니다.
                 변경할 항목만 전달하며, null인 항목은 기존 값을 유지합니다.
                 기존 예약과 충돌하는 운영시간 변경은 거절됩니다.
+                공간 대표 사진 수정 및 교체는 imagePath로 전달하지 않고, 별도 사진 업로드 API(PUT /api/v1/admin/spaces/{spaceId}/image)를 사용합니다. imagePath는 비워두어야 합니다.
                 """
     )
     @ApiResponses({
@@ -178,9 +180,69 @@ public class AdminSpaceController {
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
-    @PutMapping(value = "/spaces/{spaceId}/image", consumes = org.springframework.http.MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Operation(
+            summary = "공간 대표 이미지 업로드 및 교체",
+            description = """
+                공간의 대표 이미지를 등록하거나 교체합니다.
+                공간 JSON 등록(POST) 또는 수정(PATCH) 이후 반환된 spaceId와 multipart/form-data의 file 파트를 전송합니다.
+                관리자 토큰(Bearer)이 필요합니다.
+                지원 형식은 JPEG(image/jpeg) 및 PNG(image/png)이며, 최대 5MB, 최대 해상도는 4096x4096px입니다.
+                업로드 성공 시 data.imagePath에 공개 이미지 조회 경로(/api/v1/space-images/{fileName})가 반환됩니다.
+                사진 업로드만 실패한 경우 공간 자체의 등록·수정은 유지되므로, 동일한 spaceId로 본 API만 재시도할 수 있습니다.
+                """
+    )
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "200",
+                    description = "공간 이미지 업로드 성공. data.imagePath에 접근 경로가 반환됩니다.",
+                    useReturnTypeSchema = true
+            ),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "400",
+                    description = """
+                        IMAGE_FILE_EMPTY: 업로드할 이미지 파일이 비어 있음.
+                        INVALID_IMAGE_FORMAT: 지원하지 않는 이미지 형식 (JPEG, PNG만 지원).
+                        IMAGE_DIMENSIONS_EXCEEDED: 이미지 해상도가 4096x4096px를 초과함.
+                        """,
+                    content = @Content(
+                            mediaType = org.springframework.http.MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ApiResponse.class)
+                    )
+            ),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "404",
+                    description = "SPACE_NOT_FOUND: 공간이 존재하지 않음",
+                    content = @Content(
+                            mediaType = org.springframework.http.MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ApiResponse.class)
+                    )
+            ),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "413",
+                    description = "IMAGE_SIZE_EXCEEDED: 파일 크기가 5MB를 초과함",
+                    content = @Content(
+                            mediaType = org.springframework.http.MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ApiResponse.class)
+                    )
+            ),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "500",
+                    description = "IMAGE_STORAGE_ERROR: 이미지 파일 저장 실패",
+                    content = @Content(
+                            mediaType = org.springframework.http.MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ApiResponse.class)
+                    )
+            )
+    })
+    @PutMapping(
+            value = "/spaces/{spaceId}/image",
+            consumes = org.springframework.http.MediaType.MULTIPART_FORM_DATA_VALUE,
+            produces = org.springframework.http.MediaType.APPLICATION_JSON_VALUE
+    )
     public ResponseEntity<ApiResponse<SpaceDetailResponse>> uploadSpaceImage(
+            @Parameter(description = "대상 공간 ID", example = "1")
             @PathVariable("spaceId") Long spaceId,
+            @Parameter(description = "업로드할 공간 대표 사진 파일 (JPEG/PNG, 최대 5MB, 최대 4096x4096px)")
             @RequestParam("file") org.springframework.web.multipart.MultipartFile file,
             @AuthenticationPrincipal AuthPrincipal authPrincipal) {
         spaceAuthorizationService.validateCanManageSpace(authPrincipal);
