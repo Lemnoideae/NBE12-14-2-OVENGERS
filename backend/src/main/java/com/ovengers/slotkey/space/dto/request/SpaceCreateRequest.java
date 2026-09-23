@@ -38,8 +38,8 @@ public record SpaceCreateRequest(
         Long pricePerSlot,
 
         @Schema(
-                description = "이미지 주소 또는 경로 (최대 500자). 파일 자체를 전송하지 않습니다.",
-                example = "/images/slotkey-test-data/space-01.jpg"
+                description = "공간 사진 등록 시 직접 입력하지 않고 비워두어야 합니다. 비어 있지 않은 값을 전송하면 VALIDATION_FAILED(400) 오류가 발생합니다. 사진은 공간 등록 후 별도 사진 업로드 API(PUT /api/v1/admin/spaces/{spaceId}/image)로 등록합니다.",
+                example = ""
         )
         @Size(max = 500, message = "이미지 경로는 500자 이하여야 합니다.")
         String imagePath,
