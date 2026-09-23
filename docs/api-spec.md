@@ -60,7 +60,7 @@
 - `PUT /admin/spaces/{spaceId}/image` (ADMIN, `multipart/form-data`): 대표 사진 파일(`file`, 5MB 이하, JPEG/PNG, 가로·세로 최대 4096px) 업로드. 바이너리 서명 및 해상도 사전 검증 후 UUID 파일명으로 디스크에 안전하게 저장하고 `Space.imagePath`(`/api/v1/space-images/{fileName}`)를 갱신하며 `audit_logs`에 기록한다(`MODIFY_SPACE`). 가격 변경이 아니므로 `version`은 증가하지 않는다. 이전 이미지가 서버 관리 이미지인 경우 파일 시스템에서 정리한다(샘플 `/images/...`는 삭제하지 않음). 응답: 200, `data` = `SpaceDetailResponse`. 오류: AUTHENTICATION_REQUIRED(401), ACCESS_DENIED(403), IMAGE_FILE_EMPTY(400), INVALID_IMAGE_FORMAT(400), IMAGE_DIMENSIONS_EXCEEDED(400), IMAGE_SIZE_EXCEEDED(413), SPACE_NOT_FOUND(404), IMAGE_STORAGE_ERROR(500)
 - `GET /space-images/{fileName}` (인증 불필요): 업로드된 공간 대표 사진 정적 스트리밍. 경로 탈출 방어, 올바른 MIME 반환(`image/jpeg`, `image/png`), `Cache-Control: public, max-age=86400`, `X-Content-Type-Options: nosniff` 헤더 제공. 오류: IMAGE_NOT_FOUND(404)
 
-관리자 화면의 등록·교체·부분 실패 복구와 Spring MVC 파일 저장 흐름은 [관리자 공간 대표 사진 안내](admin-space-image-upload.md)의 다이어그램을 참고한다.
+관리자 화면의 등록·교체·부분 실패 복구와 Spring MVC 파일 저장 흐름은 [관리자 공간 대표 사진 안내](admin-space-image-upload.md)의 다이어그램을 참고한다. Swagger UI(`/swagger-ui.html`)에서도 `Authorize(관리자 accessToken 입력, Bearer 제외) → 공간 등록(POST) 또는 수정(PATCH, imagePath 비워 둠) → 반환된 spaceId로 사진 업로드(PUT multipart file) → 응답 data.imagePath 파일명으로 공개 조회(GET)` 순서로 직접 테스트할 수 있다. 사진 PUT 실패 시 공간 저장은 유지되므로 동일 spaceId로 PUT만 재시도한다.
 
 ## 5. 예약 · 크레딧 (Reservation & Credit)
 
