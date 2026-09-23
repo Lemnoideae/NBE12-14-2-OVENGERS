@@ -11,6 +11,12 @@ export const ROUTES = {
   reservationDetail: (reservationId: number | string) => `/reservations/${reservationId}`,
   reservationPayment: (reservationId: number | string) => `/reservations/${reservationId}/payment`,
 
+  inquiries: '/inquiries',
+  inquiryNew: '/inquiries/new',
+  inquiryDetail: (id: number | string) => `/inquiries/detail?id=${id}`,
+  adminInquiries: '/admin/inquiries',
+  adminInquiryDetail: (id: number | string) => `/admin/inquiries/detail?id=${id}`,
+
   door: '/door',
 
   adminSpaces: '/admin/spaces',
@@ -30,12 +36,12 @@ export interface NavItem {
 /** 상단 메뉴 (일반 사용자) */
 export const USER_NAV: NavItem[] = [
   { href: ROUTES.spaces, label: '오피스 찾기' },
-  { href: ROUTES.reservations, label: '내 예약', requiresAuth: true },
   { href: ROUTES.door, label: '모의 출입' },
 ];
 
 /** 좌측 메뉴 (관리자) */
 export const ADMIN_NAV: NavItem[] = [
+  { href: ROUTES.adminInquiries, label: '문의 관리' },
   { href: ROUTES.adminSpaces, label: '공간 관리' },
   { href: ROUTES.adminReservations, label: '예약 관리' },
   { href: ROUTES.adminMembers, label: '회원 관리' },
