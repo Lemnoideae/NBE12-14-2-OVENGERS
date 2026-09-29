@@ -54,12 +54,22 @@ public class AdminMemberService {
 
     // 관리자 크레딧 지급 (credit_transaction, audit_log 양쪽에 기록)
     @Transactional
-    public AdminMemberResponse grantCredit(Long memberId, int amount, String reason, Long adminMemberId) {
+    public AdminMemberResponse grantCredit(
+            Long memberId,
+            int amount,
+            String reason,
+            Long adminMemberId
+    ) {
         if (adminMemberId.equals(memberId)) {
             throw new BusinessException(ErrorCode.SELF_GRANT_NOT_ALLOWED);
         }
 
-        Member member = findMember(memberId);
+        Member member = findMemberForUpdate(memberId);
+
+        if (member.getStatus() == MemberStatus.WITHDRAWN) {
+            throw new BusinessException(ErrorCode.MEMBER_WITHDRAWN);
+        }
+
         int beforeBalance = member.getBalance();
 
         creditGrantService.grantAdminCredit(memberId, amount, reason);
@@ -73,10 +83,12 @@ public class AdminMemberService {
                 memberId,
                 reason,
                 beforeBalance,
-                updatedMember.getBalance());
+                updatedMember.getBalance()
+        );
 
         return toAdminMemberResponse(updatedMember);
     }
+
 
     private MemberStatusChangeResponse changeStatus(
             Long memberId,
@@ -84,7 +96,11 @@ public class AdminMemberService {
             String reason,
             Long adminMemberId,
             AuditAction action) {
-        Member member = findMember(memberId);
+        Member member = findMemberForUpdate(memberId);
+
+        if (member.getStatus() == MemberStatus.WITHDRAWN) {
+            throw new BusinessException(ErrorCode.MEMBER_WITHDRAWN);
+        }
 
         // 관리자 계정은 정지/복구 대상이 될 수 없음
         if (member.getRole() == MemberRole.ADMIN) {
@@ -127,5 +143,13 @@ public class AdminMemberService {
     private Member findMember(Long memberId) {
         return memberRepository.findById(memberId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.MEMBER_NOT_FOUND));
+    }
+
+
+    private Member findMemberForUpdate(Long memberId) {
+        return memberRepository.findByIdForUpdate(memberId)
+                .orElseThrow(() ->
+                        new BusinessException(ErrorCode.MEMBER_NOT_FOUND)
+                );
     }
 }

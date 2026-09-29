@@ -17,6 +17,10 @@ public enum ErrorCode {
     FORBIDDEN_ROLE(HttpStatus.FORBIDDEN, "FORBIDDEN_ROLE", "접근 권한이 없습니다."),
     TARGET_IS_ADMIN(HttpStatus.UNPROCESSABLE_ENTITY, "TARGET_IS_ADMIN", "관리자 계정은 정지하거나 복구할 수 없습니다."),
     SELF_GRANT_NOT_ALLOWED(HttpStatus.UNPROCESSABLE_ENTITY, "SELF_GRANT_NOT_ALLOWED", "자기 자신에게는 크레딧을 지급할 수 없습니다."),
+    ACCOUNT_WITHDRAWN(HttpStatus.UNAUTHORIZED, "ACCOUNT_WITHDRAWN", "탈퇴한 계정입니다."),
+    MEMBER_WITHDRAWN(HttpStatus.CONFLICT, "MEMBER_WITHDRAWN", "탈퇴한 회원의 상태를 변경하거나 크레딧을 지급할 수 없습니다."),
+    CURRENT_PASSWORD_MISMATCH(HttpStatus.BAD_REQUEST, "CURRENT_PASSWORD_MISMATCH", "현재 비밀번호가 일치하지 않습니다."),
+
     //── Refresh_token ─────────────────────────────────────────
     INVALID_CREDENTIALS(HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS", "이메일 또는 비밀번호가 올바르지 않습니다."),
     ACCOUNT_INACTIVE(HttpStatus.FORBIDDEN, "ACCOUNT_INACTIVE", "이용이 제한된 계정입니다."),
@@ -46,6 +50,7 @@ public enum ErrorCode {
     INSUFFICIENT_BALANCE(HttpStatus.UNPROCESSABLE_ENTITY, "INSUFFICIENT_BALANCE", "크레딧 잔액이 부족합니다."),
     INVALID_RESERVATION_TIME(HttpStatus.BAD_REQUEST, "INVALID_RESERVATION_TIME", "예약 가능한 시간이 아닙니다."),
     IDEMPOTENCY_KEY_REQUIRED(HttpStatus.BAD_REQUEST, "IDEMPOTENCY_KEY_REQUIRED", "Idempotency-Key 헤더가 필요합니다."),
+    WITHDRAWAL_ACTIVE_RESERVATION(HttpStatus.CONFLICT, "WITHDRAWAL_ACTIVE_RESERVATION", "진행 중이거나 예정된 예약이 있어 탈퇴할 수 없습니다."),
 
     // ── Door Access ──────────────────────────────────────
     ACCESS_TOKEN_NOT_FOUND(HttpStatus.NOT_FOUND, "ACCESS_TOKEN_NOT_FOUND", "출입 토큰을 찾을 수 없습니다."),
