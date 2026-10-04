@@ -4,6 +4,7 @@ import '../styles/home-shell.css';
 import Providers from './providers';
 import Footer from '../components/layout/Footer';
 import '../styles/site-footer.css';
+import { Analytics } from '@vercel/analytics/next';
 
 export const metadata = {
   title: {
@@ -33,6 +34,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <body>
         <Providers>{children}</Providers>
         <Footer />
+        <Analytics />
       </body>
     </html>
   );
