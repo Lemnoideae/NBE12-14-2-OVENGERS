@@ -12,5 +12,14 @@ custom:
     expire-millis: 300000
 
 app:
+  pg:
+    toss:
+      secret-key: test-gsk-dummy-never-call-external-api
+
   space-image:
     storage-root: build/tmp/space-images
+
+slotkey:
+  scheduler:
+    charge-recovery:
+      enabled: false
