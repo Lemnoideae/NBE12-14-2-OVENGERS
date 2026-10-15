@@ -1,5 +1,15 @@
 package com.ovengers.slotkey.auth.controller;
 
+import com.ovengers.slotkey.auth.entity.VerificationPurpose;
+import com.ovengers.slotkey.auth.mail.VerificationMailSender;
+import com.ovengers.slotkey.auth.service.VerificationChallengeService;
+import com.ovengers.slotkey.auth.service.VerificationCheckService;
+import org.springframework.boot.test.mock.mockito.MockBean;
+
+import java.util.concurrent.atomic.AtomicReference;
+
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.doAnswer;
 import com.ovengers.slotkey.member.entity.Member;
 import com.ovengers.slotkey.member.entity.MemberRole;
 import com.ovengers.slotkey.member.entity.MemberStatus;
@@ -17,7 +27,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.transaction.annotation.Transactional;
-
+import java.time.Clock;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultHandlers.print;
@@ -31,6 +41,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.transaction.annotation.Propagation;
 
+import com.ovengers.slotkey.auth.entity.LocalCredential;
+import com.ovengers.slotkey.auth.repository.LocalCredentialRepository;
 import static org.mockito.Mockito.doReturn;
 import java.time.LocalDateTime;
 import java.util.Map;
@@ -46,7 +58,10 @@ public class AuthControllerTest {
     private ObjectMapper objectMapper;
     @Autowired
     private MockMvc mvc;
-
+    @Autowired
+    private LocalCredentialRepository localCredentialRepository;
+    @Autowired
+    private Clock clock;
     @SpyBean // 스파이빈은 실제 레포지토리를 이용하면서 테스트에서 지정한 메스드만 결과를 바꿀수 있게 한다고 합니다.
     private MemberRepository memberRepository;
 
@@ -54,7 +69,14 @@ public class AuthControllerTest {
     private PasswordEncoder passwordEncoder;
     @Value("${custom.jwt.secret-key}")
     private String secretKey;
+    @Autowired
+    private VerificationChallengeService challengeService;
 
+    @Autowired
+    private VerificationCheckService checkService;
+
+    @MockBean
+    private VerificationMailSender mailSender;
     @Autowired
     private EntityManager entityManager;
     @Test
@@ -62,6 +84,7 @@ public class AuthControllerTest {
     void t1() throws Exception {
         // 1. 가입할 회원 정보 준비
         String email = "signup-test@example.com";
+        String grant = issueSignupGrant(email);
         String password = "Test1234!";
         String nickname = "테스트회원";
 
@@ -71,19 +94,14 @@ public class AuthControllerTest {
                         post("/api/v1/auth/signup")
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("""
-                                                {
-                                                    "email": "%s",
-                                                    "password": "%s",
-                                                    "passwordConfirm": "%s",
-                                                    "nickname": "%s"
-                                                }
-                                                """.formatted(
-                                                email,
-                                                password,
-                                                password,
-                                                nickname
-                                        )
-                                )
+        {
+            "email": "%s",
+            "password": "%s",
+            "passwordConfirm": "%s",
+            "nickname": "%s",
+            "grant": "%s"
+        }
+        """.formatted(email, password, password, nickname, grant))
                 )
                 .andDo(print());
 
@@ -104,16 +122,17 @@ public class AuthControllerTest {
         assertThat(member.getStatus()).isEqualTo(MemberStatus.ACTIVE);
         assertThat(member.getCreatedAt()).isNotNull();
 
+        LocalCredential credential = localCredentialRepository
+                .findById(member.getId())
+                .orElseThrow();
         // 원문이 그대로 저장되지 않았는지 확인
-        assertThat(member.getPasswordHash()).isNotEqualTo(password);
+        assertThat(credential.getPasswordHash()).isNotEqualTo(password);
 
         // 저장된 해시가 입력한 비밀번호와 일치하는지 확인
-        assertThat(
-                passwordEncoder.matches(
-                        password,
-                        member.getPasswordHash()
-                )
-        ).isTrue();
+        assertThat(passwordEncoder.matches(
+                password,
+                credential.getPasswordHash()
+        )).isTrue();
     }
 
     @Test
@@ -121,12 +140,12 @@ public class AuthControllerTest {
     void t2() throws Exception {
         // 1. 이미 가입된 회원을 직접 저장
         String email = "duplicate-test@example.com";
+        String grant = issueSignupGrant(email);
         String password = "Test1234!";
 
         Member existingMember = memberRepository.save(
                 new Member(
                         email,
-                        passwordEncoder.encode(password),
                         "기존회원"
                 )
         );
@@ -139,18 +158,14 @@ public class AuthControllerTest {
                         post("/api/v1/auth/signup")
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("""
-                                                {
-                                                    "email": "%s",
-                                                    "password": "%s",
-                                                    "passwordConfirm": "%s",
-                                                    "nickname": "새회원"
-                                                }
-                                                """.formatted(
-                                                email,
-                                                password,
-                                                password
-                                        )
-                                )
+        {
+            "email": "%s",
+            "password": "%s",
+            "passwordConfirm": "%s",
+            "nickname": "새회원",
+            "grant": "%s"
+        }
+        """.formatted(email, password, password, grant))
                 )
                 .andDo(print());
 
@@ -177,6 +192,7 @@ public class AuthControllerTest {
     void t3() throws Exception {
         // 1. 서로 다른 비밀번호 준비
         String email = "password-mismatch@example.com";
+        String grant = issueSignupGrant(email);
         long memberCountBefore = memberRepository.count();
 
         // 2. 회원가입 요청
@@ -185,13 +201,14 @@ public class AuthControllerTest {
                         post("/api/v1/auth/signup")
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("""
-                                        {
-                                            "email": "%s",
-                                            "password": "Test1234!",
-                                            "passwordConfirm": "Different1234!",
-                                            "nickname": "테스트회원"
-                                        }
-                                        """.formatted(email))
+        {
+            "email": "%s",
+            "password": "Test1234!",
+            "passwordConfirm": "Different1234!",
+            "nickname": "테스트회원",
+            "grant": "%s"
+        }
+        """.formatted(email, grant))
                 )
                 .andDo(print());
 
@@ -233,7 +250,6 @@ public class AuthControllerTest {
         memberRepository.save(
                 new Member(
                         email,
-                        passwordEncoder.encode("Correct1234!"),
                         "테스트회원"
                 )
         );
@@ -563,11 +579,15 @@ public class AuthControllerTest {
     private MvcResult loginForTest(String email) throws Exception {
         String password = "Test1234!";
 
-        memberRepository.save(
-                new Member(
-                        email,
+        Member member = memberRepository.saveAndFlush(
+                new Member(email, "테스트회원")
+        );
+
+        localCredentialRepository.saveAndFlush(
+                new LocalCredential(
+                        member,
                         passwordEncoder.encode(password),
-                        "테스트회원"
+                        LocalDateTime.now(clock)
                 )
         );
 
@@ -575,11 +595,11 @@ public class AuthControllerTest {
                         post("/api/v1/auth/login")
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("""
-                                        {
-                                            "email": "%s",
-                                            "password": "%s"
-                                        }
-                                        """.formatted(email, password))
+                                    {
+                                        "email": "%s",
+                                        "password": "%s"
+                                    }
+                                    """.formatted(email, password))
                 )
                 .andExpect(status().isOk())
                 .andReturn();
@@ -636,13 +656,16 @@ public class AuthControllerTest {
     @DisplayName("사전 중복 검사를 통과해도 DB에서 이메일이 중복되면 409를 반환한다")
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void t18() throws Exception {
-        String email = "duplicate-at-save@example.com";
+        String email = "duplicate-at-save-"
+                + java.util.UUID.randomUUID()
+                + "@example.com";
+
+        String grant = issueSignupGrant(email);
 
         // 다른 가입 요청이 먼저 성공한 상황을 준비
         Member existingMember = memberRepository.saveAndFlush(
                 new Member(
                         email,
-                        passwordEncoder.encode("Test1234!"),
                         "기존회원"
                 )
         );
@@ -658,13 +681,14 @@ public class AuthControllerTest {
                             post("/api/v1/auth/signup")
                                     .contentType(MediaType.APPLICATION_JSON)
                                     .content("""
-                                        {
-                                            "email": "%s",
-                                            "password": "Test1234!",
-                                            "passwordConfirm": "Test1234!",
-                                            "nickname": "새회원"
-                                        }
-                                        """.formatted(email))
+        {
+            "email": "%s",
+            "password": "Test1234!",
+            "passwordConfirm": "Test1234!",
+            "nickname": "새회원",
+            "grant": "%s"
+        }
+        """.formatted(email, grant))
                     )
                     .andDo(print())
                     .andExpect(status().isConflict())
@@ -684,6 +708,34 @@ public class AuthControllerTest {
             // 이 테스트는 자동 롤백을 사용하지 않으므로 직접 정리
             memberRepository.deleteById(existingMember.getId());
         }
+    }
+    private String issueSignupGrant(String email) {
+        AtomicReference<String> deliveredCode = new AtomicReference<>();
+
+        doAnswer(invocation -> {
+            deliveredCode.set(invocation.getArgument(2, String.class));
+            return null;
+        }).when(mailSender).sendCode(
+                eq(email),
+                eq(VerificationPurpose.SIGNUP),
+                anyString()
+        );
+
+        var issued = challengeService.issue(
+                email,
+                VerificationPurpose.SIGNUP
+        );
+
+        var checked = checkService.verify(
+                email,
+                VerificationPurpose.SIGNUP,
+                issued.challengeId(),
+                deliveredCode.get()
+        );
+
+        assertThat(checked.grant()).isNotBlank();
+
+        return checked.grant();
     }
 }
 

@@ -54,8 +54,11 @@ public class SecurityConfig {
                                 HttpMethod.POST,
                                 "/api/v1/auth/signup",
                                 "/api/v1/auth/login",
+                                "/api/v1/auth/password-reset",
                                 "/api/v1/auth/refresh",
-                                "/api/v1/auth/logout"
+                                "/api/v1/auth/logout",
+                                "/api/v1/auth/verification/issue",
+                                "/api/v1/auth/verification/check"
                         ).permitAll()
 
                                         // 공간 목록, 상세, 슬롯 가용성 비회원 조회 허용

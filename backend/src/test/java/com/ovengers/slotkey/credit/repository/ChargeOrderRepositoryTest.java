@@ -31,7 +31,7 @@ class ChargeOrderRepositoryTest extends IntegrationTestSupport {
     @DisplayName("orderId는 PK와 별도 컬럼이며 DB UNIQUE 제약으로 중복을 거절한다")
     void save_duplicateOrderId_violatesUniqueConstraint() {
         Member member = memberRepository.save(
-                new Member("charge-order@test.com", "hash", "충전회원")
+                new Member("charge-order@test.com", "충전회원")
         );
         String orderId = "chg_550e8400-e29b-41d4-a716-446655440000";
         LocalDateTime now = LocalDateTime.of(2026, 10, 13, 9, 0);
@@ -53,7 +53,7 @@ class ChargeOrderRepositoryTest extends IntegrationTestSupport {
     @DisplayName("CONFIRMING 전이는 최초 복구 시각을 전이 1분 뒤로 저장한다")
     void startConfirming_schedulesFirstRecoveryAfterOneMinute() {
         Member member = memberRepository.save(
-                new Member("recovery-schedule@test.com", "hash", "복구회원")
+                new Member("recovery-schedule@test.com", "복구회원")
         );
         LocalDateTime confirmingAt = LocalDateTime.of(2026, 10, 14, 12, 0);
         ChargeOrder order = chargeOrderRepository.saveAndFlush(
@@ -89,7 +89,7 @@ class ChargeOrderRepositoryTest extends IntegrationTestSupport {
     @DisplayName("복구 후보는 1분 경계를 포함하고 24시간 경계를 제외해 다음 시도 시각 순으로 조회한다")
     void findRecoveryCandidateIds_appliesTimeWindowAndStableOrder() {
         Member member = memberRepository.save(
-                new Member("recovery-candidates@test.com", "hash", "후보회원")
+                new Member("recovery-candidates@test.com", "후보회원")
         );
         LocalDateTime now = LocalDateTime.of(2026, 10, 14, 12, 0);
         ChargeOrder missingRecoverySchedule = confirmingOrder(member, 0, now.minusMinutes(2));
@@ -126,7 +126,7 @@ class ChargeOrderRepositoryTest extends IntegrationTestSupport {
     @DisplayName("첫 50건의 다음 시각을 미루면 51번째 CONFIRMING 주문이 다음 조회에 포함된다")
     void findRecoveryCandidateIds_rescheduledFirstBatchDoesNotStarveNextOrder() {
         Member member = memberRepository.save(
-                new Member("recovery-fairness@test.com", "hash", "공정성회원")
+                new Member("recovery-fairness@test.com", "공정성회원")
         );
         LocalDateTime now = LocalDateTime.of(2026, 10, 14, 12, 0);
         for (int sequence = 1; sequence <= 51; sequence++) {

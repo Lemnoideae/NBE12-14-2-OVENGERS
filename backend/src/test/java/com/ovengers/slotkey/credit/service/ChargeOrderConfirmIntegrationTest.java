@@ -720,7 +720,6 @@ class ChargeOrderConfirmIntegrationTest extends IntegrationTestSupport {
     private Long createMember(String label) {
         Member member = memberRepository.saveAndFlush(new Member(
                 label + "-" + UUID.randomUUID() + "@test.com",
-                "passwordHash",
                 label
         ));
         return member.getId();

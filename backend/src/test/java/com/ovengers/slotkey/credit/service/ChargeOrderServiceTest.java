@@ -158,6 +158,6 @@ class ChargeOrderServiceTest {
     }
 
     private Member activeMember() {
-        return new Member("member@test.com", "passwordHash", "member");
+        return new Member("member@test.com", "member");
     }
 }

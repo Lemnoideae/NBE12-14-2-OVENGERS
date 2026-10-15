@@ -70,7 +70,6 @@ class ChargeOrderRecoveryProcessorIntegrationTest extends IntegrationTestSupport
         fakePgClient.reset();
         Member member = memberRepository.saveAndFlush(new Member(
                 "recovery-" + UUID.randomUUID() + "@test.com",
-                "passwordHash",
                 "복구회원"
         ));
         memberId = member.getId();

@@ -21,9 +21,6 @@ public class Member extends BaseTimeEntity {
     @Column(unique = true, nullable = false, length = 254)
     private String email;
 
-    @Column(name = "password_hash", nullable = false, length = 255)
-    private String passwordHash;
-
     @Column(nullable = false, length = 50)
     private String nickname;
 
@@ -41,9 +38,11 @@ public class Member extends BaseTimeEntity {
     @Column(name = "withdrawn_at")
     private LocalDateTime withdrawnAt;
 
-    public Member(String email, String passwordHash, String nickname) {
+    @Column(name = "email_verified_at")
+    private LocalDateTime emailVerifiedAt;
+
+    public Member(String email, String nickname) {
         this.email = email;
-        this.passwordHash = passwordHash;
         this.nickname = nickname;
         this.role = MemberRole.USER;
         this.status = MemberStatus.ACTIVE;
@@ -70,5 +69,19 @@ public class Member extends BaseTimeEntity {
 
     public void addCredits(int amount) {
         this.balance += amount;
+    }
+
+    public boolean isEmailVerified() {
+        return emailVerifiedAt != null;
+    }
+
+    public void verifyEmail(LocalDateTime verifiedAt) {
+        if (verifiedAt == null) {
+            throw new IllegalArgumentException("인증 시각은 필수입니다.");
+        }
+
+        if (this.emailVerifiedAt == null) {
+            this.emailVerifiedAt = verifiedAt;
+        }
     }
 }

@@ -6,6 +6,7 @@ import com.ovengers.slotkey.audit.entity.AuditTargetType;
 import com.ovengers.slotkey.audit.repository.AuditLogRepository;
 import com.ovengers.slotkey.audit.service.AuditLogService;
 import com.ovengers.slotkey.credit.service.CreditGrantService;
+import com.ovengers.slotkey.auth.service.VerificationGuardService;
 import com.ovengers.slotkey.global.error.BusinessException;
 import com.ovengers.slotkey.global.error.ErrorCode;
 import com.ovengers.slotkey.member.dto.response.AdminMemberResponse;
@@ -52,6 +53,9 @@ class AdminMemberServiceTest {
     @Mock
     private CreditGrantService creditGrantService;
 
+    @Mock
+    private VerificationGuardService verificationGuardService;
+
     private Clock clock;
     private AdminMemberService adminMemberService;
 
@@ -67,7 +71,8 @@ class AdminMemberServiceTest {
                 auditLogRepository,
                 auditLogService,
                 creditGrantService,
-                clock
+                clock,
+                verificationGuardService
         );
     }
 
@@ -146,7 +151,8 @@ class AdminMemberServiceTest {
                                 memberId,
                                 List.of(
                                         AuditAction.SUSPEND_MEMBER,
-                                        AuditAction.REACTIVATE_MEMBER
+                                        AuditAction.REACTIVATE_MEMBER,
+                                        AuditAction.LOCK_MEMBER_BY_VERIFICATION
                                 )
                         )
         ).willReturn(Optional.of(auditLog));
@@ -242,11 +248,13 @@ class AdminMemberServiceTest {
 
         Member member = mock(Member.class);
 
+        given(memberRepository.findById(memberId)).willReturn(Optional.of(member));
         given(memberRepository.findByIdForUpdate(memberId)).willReturn(Optional.of(member));
         given(member.getId()).willReturn(memberId);
         given(member.getRole()).willReturn(MemberRole.USER);
         given(member.getStatus())
                 .willReturn(
+                        MemberStatus.SUSPENDED,
                         MemberStatus.SUSPENDED,
                         MemberStatus.SUSPENDED,
                         MemberStatus.ACTIVE
@@ -314,7 +322,7 @@ class AdminMemberServiceTest {
 
         Member member = mock(Member.class);
 
-        given(memberRepository.findByIdForUpdate(memberId)).willReturn(Optional.of(member));
+        given(memberRepository.findById(memberId)).willReturn(Optional.of(member));
         given(member.getStatus()).willReturn(MemberStatus.ACTIVE);
         given(member.getRole()).willReturn(MemberRole.ADMIN);
 
@@ -414,7 +422,8 @@ class AdminMemberServiceTest {
                                 memberId,
                                 List.of(
                                         AuditAction.SUSPEND_MEMBER,
-                                        AuditAction.REACTIVATE_MEMBER
+                                        AuditAction.REACTIVATE_MEMBER,
+                                        AuditAction.LOCK_MEMBER_BY_VERIFICATION
                                 )
                         )
         ).willReturn(Optional.empty());

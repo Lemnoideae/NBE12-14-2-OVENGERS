@@ -5,6 +5,7 @@ import com.ovengers.slotkey.audit.entity.AuditLog;
 import com.ovengers.slotkey.audit.entity.AuditTargetType;
 import com.ovengers.slotkey.audit.repository.AuditLogRepository;
 import com.ovengers.slotkey.audit.service.AuditLogService;
+import com.ovengers.slotkey.auth.service.VerificationGuardService;
 import com.ovengers.slotkey.credit.service.CreditGrantService;
 import com.ovengers.slotkey.global.error.BusinessException;
 import com.ovengers.slotkey.global.error.ErrorCode;
@@ -33,6 +34,7 @@ public class AdminMemberService {
     private final AuditLogService auditLogService;
     private final CreditGrantService creditGrantService;
     private final Clock clock;
+    private final VerificationGuardService verificationGuardService;
 
     @Transactional(readOnly = true)
     public Page<AdminMemberResponse> getMembers(MemberStatus status, String keyword, Pageable pageable) {
@@ -49,6 +51,18 @@ public class AdminMemberService {
     // 계정 복구
     @Transactional
     public MemberStatusChangeResponse restore(Long memberId, String reason, Long adminMemberId) {
+        Member member = memberRepository.findById(memberId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.MEMBER_NOT_FOUND));
+
+        if (member.getStatus() == MemberStatus.WITHDRAWN) {
+            throw new BusinessException(ErrorCode.MEMBER_WITHDRAWN);
+        }
+        if (member.getRole() == MemberRole.ADMIN) {
+            throw new BusinessException(ErrorCode.TARGET_IS_ADMIN);
+        }
+
+        // 인증 처리와 같은 순서로 VerificationGuard 잠금을 먼저 확보한다.
+        verificationGuardService.unlockAllForEmail(member.getEmail());
         return changeStatus(memberId, MemberStatus.ACTIVE, reason, adminMemberId, AuditAction.REACTIVATE_MEMBER);
     }
 
@@ -108,6 +122,7 @@ public class AdminMemberService {
         }
 
         MemberStatus beforeStatus = member.getStatus();
+
         member.updateStatus(targetStatus);
 
         LocalDateTime changedAt = LocalDateTime.now(clock);
@@ -131,7 +146,11 @@ public class AdminMemberService {
                 .findFirstByTargetTypeAndTargetIdAndActionInOrderByCreatedAtDescIdDesc(
                         AuditTargetType.MEMBER,
                         member.getId(),
-                        List.of(AuditAction.SUSPEND_MEMBER, AuditAction.REACTIVATE_MEMBER))
+                        List.of(
+                                AuditAction.SUSPEND_MEMBER,
+                                AuditAction.REACTIVATE_MEMBER,
+                                AuditAction.LOCK_MEMBER_BY_VERIFICATION
+                        ))
                 .orElse(null);
 
         LocalDateTime lastStatusChangedAt = lastStatusChangeLog != null ? lastStatusChangeLog.getCreatedAt() : null;
