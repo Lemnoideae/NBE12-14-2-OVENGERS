@@ -67,6 +67,26 @@
 - **중복 전달은 at-least-once의 정상 범위다.** 불변식을 지켜도 전송 성공 후 `markPublished` 직전 장애 등으로 같은 이벤트가 두 번 나갈 수 있다. 막으려고 하지 않고 컨슈머 멱등 처리(`processed_event`, 4단계)로 흡수한다. 전송은 성공했는데 `markPublished`가 실패하는 경우도 같다 — 행이 `PENDING`으로 남고 `attempts`가 오른 채 다음 라운드에 다시 발행된다(로그 메시지로 "전송 실패"와 구분하며, `OutboxRelayTest`가 이 분기를 고정한다).
 - **기본은 꺼짐.** `slotkey.kafka.enabled=false`(환경변수 `SLOTKEY_KAFKA_ENABLED`)이면 `OutboxRelay`와 `KafkaOutboxPublisher` 빈이 생성되지 않는다. 브로커가 없는 팀 EC2 배포가 기동에 실패하지 않게 하기 위해서다. 브로커 주소는 `KAFKA_BOOTSTRAP_SERVERS`(기본 `localhost:9092`).
 
+## 컨슈머 결정 (2026-10-16, 4단계)
+
+계획 문서([02 §1](../plans/waitlist-outbox/02-outbox-kafka-design.md))의 컨슈머 방향(얇은 리스너 + `SlotReleasedHandler`, `processed_event` 멱등, 알림 대상 재검사)은 그대로 따른다. 여기에는 문서에 비어 있던 값만 적는다.
+
+- **이벤트 payload (실제 2단계 코드 `SlotReleasedRecorder.Payload` 기준):** `eventId`, `reservationId`, `reason`, `occurredAt` 4필드. `spaceId`와 구간은 payload에 없다. 컨슈머가 `reservationId`로 예약 행을 조회해 `spaceId`, `startTime`, `endTime`을 얻는다(취소·만료 뒤에도 예약 행은 남는다).
+- **컨슈머 그룹 id:** `slotkey-waitlist-notifier`. 용도가 이름에 드러나게 하고, 나중에 같은 토픽을 감사 등 다른 컨슈머가 읽어도 오프셋이 섞이지 않게 한다. `processed_event.consumer`에는 같은 의미로 `waitlist-notifier`를 쓴다.
+- **오프셋 시작 위치:** `auto-offset-reset=earliest`. 컨슈머가 relay보다 늦게 떠도 이벤트를 잃지 않는다. 과거 이벤트가 재생돼도 알림 대상을 "지금" 기준으로 다시 고르므로 틀린 알림은 나가지 않는다.
+- **실패 시 재시도:** Spring Kafka 3.2.4의 기본 `DefaultErrorHandler`는 `FixedBackOff(0, 9)`(간격 없이 총 10회 시도 후 로그만 남기고 건너뜀)이다(`SeekUtils.DEFAULT_BACK_OFF`를 바이트코드로 확인). 즉시 10번 두들기면 DB 순간 장애에 의미가 없으므로 `FixedBackOff(1000ms, 2회 재시도)`로 짧게 제한하고, 소진되면 건너뛴다. 해석 불가능한 payload(`IllegalArgumentException`)는 재시도해도 같으므로 재시도 없이 건너뛴다. **DLT(dead-letter topic)는 3차로 미룬다** — 건너뛴 이벤트는 로그에만 남고 복구 수단이 없다는 한계를 안고 간다.
+- **멱등 처리:** 한 트랜잭션 안에서 ① `INSERT IGNORE INTO processed_event(consumer, event_id)`(UNIQUE(consumer, event_id))를 먼저 실행해 영향 행이 0이면 이미 처리한 이벤트로 보고 아무것도 하지 않는다 ② 알림 INSERT. 둘이 같은 트랜잭션이므로 알림 저장이 실패하면 `processed_event`도 롤백되어 재전달 때 다시 처리된다. 알림 테이블에도 UNIQUE(event_id, waitlist_entry_id)를 걸어 이중으로 막는다.
+
+- **한계 — 취소와 컨슈머가 경합하면 취소 직후에도 알림이 한 건 생길 수 있다:** 핸들러가 후보(활성 WAITING)를 읽은 뒤 사용자의 대기 취소가 커밋되면, `markNotified`는 WAITING이 아니라 0건을 갱신하지만 알림 저장은 이미 끝나 있어 취소한 사용자에게 알림이 저장된다(`markNotified` 반환값을 보지 않는다). 허용한다: 알림은 힌트일 뿐이고 최종 판정은 슬롯 UNIQUE이며, 이 경합을 막으려면 후보 행에 락을 걸어야 하는데 3단계의 "락 대기 없음" 원칙(취소·강제 취소·홀드 만료 트랜잭션이 relay나 컨슈머와 락을 기다리지 않는다)을 깨기 때문이다. 재검토 조건: 취소 직후 알림 민원이 관측될 때(그때는 `markNotified`를 먼저 호출하고 반환값 1일 때만 알림을 저장하는 순서 변경이 후보다).
+- **한계 — `INSERT IGNORE`는 중복 외 오류도 삼킬 수 있다:** `event_id VARCHAR(36)`에 36자를 넘는 값이 들어오면 잘려 저장되어, 앞 36자가 같은 서로 다른 `event_id`를 중복으로 오판하는 것이 재현되었다(MySQL 8.4 기본 strict 모드). 현재는 수용한다: `event_id`는 우리 outbox가 만드는 36자 UUID이고 나머지 컬럼은 코드 상수·시각뿐이다. 재검토 조건: 외부 입력이 이벤트 id를 만들게 될 때 — 그때 리스너에서 길이(36자 초과)를 검증해 `IllegalArgumentException`(비재시도)으로 거른다.
+
+- **컨슈머 테스트 (경계·엣지 케이스):** 실제 MySQL(Testcontainers)과 Fake 구성으로 Kafka 없이 돈다.
+  - 멱등: 같은 이벤트 2회 순차 전달, 같은 `eventId`를 4개 스레드가 동시에 처리(예외 없이 알림·처리 기록 각 1건), 알림 저장 실패 시 처리 기록 롤백, 후보 여러 명 중 뒤쪽 후보가 실패하면 앞선 알림·알림 시각·처리 기록 전부 롤백, 같은 대기 항목에 다른 이벤트 2개면 알림 2건(재알림 쓰로틀 없음을 고정).
+  - 대상 선정: 구간 일부만 비었으면 제외, 재점유(만료 전 HELD) 제외·만료된 HELD는 알림, 정지·탈퇴·CANCELLED 제외, 시작이 지난 항목 제외, 시작 시각이 핸들러의 `now`와 정확히 같으면 제외(고정 Clock으로 검증하고 쿼리 `>`를 `>=`로 바꾸면 실패함을 확인), 본인 CONFIRMED·만료 전 HELD 겹침 제외, 다른 공간·겹치지 않는 본인 예약은 알림, 대기 구간이 해제 구간보다 넓거나 일부만 겹쳐도 구간 전체가 비었으면 알림, 공간 이름 최대 100자에서도 문구가 500자 컬럼에 들어감.
+  - 리스너 payload: 정상 4필드, 모르는 필드 추가, 그리고 깨진 JSON·타입 불일치(`eventId` 숫자·null·빈 문자열·공백, `reservationId` 문자열·null·실수 1.5·long 범위 초과)·배열·빈 입력은 모두 `IllegalArgumentException`(비재시도)이며 핸들러를 호출하지 않는다.
+  - 이 테스트로 리스너의 결함 두 건이 드러나 고쳤다: `reservationId` 1.5가 1로 잘려 엉뚱한 예약으로 처리되던 것(정수만 허용), 빈 `eventId`가 통과해 모든 빈 이벤트가 "이미 처리함"으로 묶이던 것(공백 거절).
+  - 일부러 두지 않은 테스트: 취소와 컨슈머 경합(위 한계로 허용), `eventId` 36자 초과(위 한계, 외부 입력이 생기면 도입), 켜진 컨텍스트에서 에러 핸들러가 컨테이너 팩토리에 붙는지와 실제 브로커 재시도(5단계 E2E).
+
 ## 열린 질문
 
 - (없음)
