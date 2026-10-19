@@ -1,6 +1,7 @@
 package com.ovengers.slotkey.global.error;
 
 import com.ovengers.slotkey.global.common.response.ApiResponse;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -8,7 +9,10 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import java.util.stream.Collectors;
+import org.springframework.web.bind.MissingRequestHeaderException;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 
+@Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
@@ -48,5 +52,49 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(ErrorCode.IMAGE_SIZE_EXCEEDED.getHttpStatus())
                 .body(ApiResponse.fail(ErrorCode.IMAGE_SIZE_EXCEEDED));
+    }
+
+    /** 필수 요청 헤더 누락 처리 */
+    @ExceptionHandler(MissingRequestHeaderException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMissingRequestHeaderException(
+            MissingRequestHeaderException e
+    ) {
+        ErrorCode errorCode =
+                "Idempotency-Key".equalsIgnoreCase(e.getHeaderName())
+                        ? ErrorCode.IDEMPOTENCY_KEY_REQUIRED
+                        : ErrorCode.VALIDATION_FAILED;
+
+        return ResponseEntity
+                .status(errorCode.getHttpStatus())
+                .body(ApiResponse.fail(errorCode));
+    }
+
+    /** 처리되지 않은 서버 예외를 공통 응답 형식으로 반환 */
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<ApiResponse<Void>> handleException(
+            Exception e
+    ) {
+        log.error(
+                "처리되지 않은 서버 예외가 발생했습니다.",
+                e
+        );
+
+        return ResponseEntity
+                .status(ErrorCode.INTERNAL_SERVER_ERROR.getHttpStatus())
+                .body(ApiResponse.fail(
+                        ErrorCode.INTERNAL_SERVER_ERROR
+                ));
+    }
+
+    /** 요청 본문을 읽거나 변환할 수 없는 경우 처리 */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ApiResponse<Void>> handleHttpMessageNotReadableException(
+            HttpMessageNotReadableException e
+    ) {
+        return ResponseEntity
+                .status(ErrorCode.VALIDATION_FAILED.getHttpStatus())
+                .body(ApiResponse.fail(
+                        ErrorCode.VALIDATION_FAILED
+                ));
     }
 }
