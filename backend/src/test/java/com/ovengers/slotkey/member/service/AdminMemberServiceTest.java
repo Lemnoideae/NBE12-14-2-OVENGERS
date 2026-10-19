@@ -1,3 +1,4 @@
+
 package com.ovengers.slotkey.member.service;
 
 import com.ovengers.slotkey.audit.entity.AuditAction;
@@ -5,6 +6,7 @@ import com.ovengers.slotkey.audit.entity.AuditLog;
 import com.ovengers.slotkey.audit.entity.AuditTargetType;
 import com.ovengers.slotkey.audit.repository.AuditLogRepository;
 import com.ovengers.slotkey.audit.service.AuditLogService;
+import com.ovengers.slotkey.credit.repository.CreditTransactionRepository;
 import com.ovengers.slotkey.credit.service.CreditGrantService;
 import com.ovengers.slotkey.auth.service.VerificationGuardService;
 import com.ovengers.slotkey.auth.service.AuthSessionService;
@@ -16,6 +18,8 @@ import com.ovengers.slotkey.member.entity.Member;
 import com.ovengers.slotkey.member.entity.MemberRole;
 import com.ovengers.slotkey.member.entity.MemberStatus;
 import com.ovengers.slotkey.member.repository.MemberRepository;
+import com.ovengers.slotkey.reservation.repository.ReservationRepository;
+import com.ovengers.slotkey.space.repository.SpaceRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -58,6 +62,15 @@ class AdminMemberServiceTest {
     private VerificationGuardService verificationGuardService;
 
     @Mock
+    private ReservationRepository reservationRepository;
+
+    @Mock
+    private CreditTransactionRepository creditTransactionRepository;
+
+    @Mock
+    private SpaceRepository spaceRepository;
+
+    @Mock
     private AuthSessionService authSessionService;
 
     private Clock clock;
@@ -77,8 +90,12 @@ class AdminMemberServiceTest {
                 creditGrantService,
                 clock,
                 verificationGuardService,
+                reservationRepository,
+                creditTransactionRepository,
+                spaceRepository,
                 authSessionService
         );
+
     }
 
     @Test

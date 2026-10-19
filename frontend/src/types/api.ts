@@ -50,6 +50,63 @@ export interface AdminMember extends Member {
   lastStatusChangeReason: string | null;
 }
 
+
+/** 관리자 회원 상세 조회 응답 */
+export interface AdminMemberDetail {
+  member: AdminMember;
+  totalReservationCount: number;
+  suspensionCount: number;
+}
+
+/** 크레딧 거래 유형 */
+export type CreditTransactionType =
+    | 'SIGNUP_GRANT'
+    | 'ADMIN_GRANT'
+    | 'RESERVATION_CHARGE'
+    | 'REFUND'
+    | 'PENALTY'
+    | 'WITHDRAWAL_EXPIRATION'
+    | 'TOP_UP';
+
+/** 관리자 회원별 크레딧 거래 내역 */
+export interface AdminMemberCreditTransaction {
+  transactionId: number;
+  type: CreditTransactionType;
+  amount: number;
+  balanceAfter: number;
+  reason: string | null;
+  createdAt: string;
+}
+
+/** 관리자 회원별 예약 내역 */
+export interface AdminMemberReservation {
+  reservationId: number;
+  spaceId: number;
+  spaceName: string;
+  startTime: string;
+  endTime: string;
+  status: ReservationStatus;
+  totalAmount: number | null;
+  createdAt: string;
+}
+
+/** 관리자 회원 상태 변경 감사 로그 유형 */
+export type AdminMemberStatusHistoryAction =
+    | 'SUSPEND_MEMBER'
+    | 'REACTIVATE_MEMBER'
+    | 'LOCK_MEMBER_BY_VERIFICATION';
+
+/** 관리자 회원별 계정 상태 변경 이력 */
+export interface AdminMemberStatusHistory {
+  historyId: number;
+  action: AdminMemberStatusHistoryAction;
+  actorMemberId: number | null;
+  reason: string | null;
+  beforeValue: string | null;
+  afterValue: string | null;
+  changedAt: string;
+}
+
 export interface AuthTokens {
   accessToken: string;
 }
