@@ -1,6 +1,8 @@
 
 package com.ovengers.slotkey.member.controller;
 
+import com.ovengers.slotkey.access.service.InactiveMemberAccessLogService;
+
 import com.ovengers.slotkey.audit.entity.AuditAction;
 import com.ovengers.slotkey.auth.service.AuthSessionService;
 import com.ovengers.slotkey.credit.entity.CreditTransactionType;
@@ -61,6 +63,9 @@ class AdminMemberDetailControllerTest {
 
     @MockBean
     private AuthSessionService authSessionService;
+
+    @MockBean
+    private InactiveMemberAccessLogService inactiveMemberAccessLogService;
 
     @BeforeEach
     void allowTestSession() {

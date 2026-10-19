@@ -45,4 +45,19 @@ public interface AuthSessionRepository extends JpaRepository<AuthSession, String
             @Param("now") LocalDateTime now,
             @Param("activeStatus") MemberStatus activeStatus
     );
+
+    // 세션 소유자가 일치하고 만료되지 않은 경우 현재 회원 상태 조회
+    // 정지 처리 시 세션도 폐기되므로 revokedAt 조건은 적용하지 않음
+    @Query("""
+            select m.status
+            from AuthSession s join s.member m
+            where s.id = :sessionId
+              and m.id = :memberId
+              and s.expiresAt > :now
+            """)
+    Optional<MemberStatus> findMemberStatusForAccessAttempt(
+            @Param("sessionId") String sessionId,
+            @Param("memberId") Long memberId,
+            @Param("now") LocalDateTime now
+    );
 }

@@ -1,6 +1,7 @@
 package com.ovengers.slotkey.global.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ovengers.slotkey.access.service.InactiveMemberAccessLogService;
 import com.ovengers.slotkey.global.common.response.ApiResponse;
 import com.ovengers.slotkey.global.error.ErrorCode;
 import com.ovengers.slotkey.global.security.CustomAuthenticationFilter;
@@ -17,6 +18,7 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import java.time.Clock;
 
 @Configuration
 @EnableWebSecurity
@@ -26,6 +28,8 @@ public class SecurityConfig {
     private final JwtProvider jwtProvider;
     private final ObjectMapper objectMapper;
     private final AuthSessionService authSessionService;
+    private final InactiveMemberAccessLogService inactiveMemberAccessLogService;
+    private final Clock clock;
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
@@ -35,7 +39,9 @@ public class SecurityConfig {
                 new CustomAuthenticationFilter(
                         jwtProvider,
                         objectMapper,
-                        authSessionService
+                        authSessionService,
+                        inactiveMemberAccessLogService,
+                        clock
                 );
 
         http

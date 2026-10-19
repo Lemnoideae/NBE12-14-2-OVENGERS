@@ -1,5 +1,7 @@
 package com.ovengers.slotkey.waitlist.controller;
 
+import com.ovengers.slotkey.access.service.InactiveMemberAccessLogService;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ovengers.slotkey.global.config.SecurityConfig;
 import com.ovengers.slotkey.global.config.ClockConfig;
@@ -69,6 +71,9 @@ class WaitlistControllerTest {
 
     @MockBean
     private AuthSessionService authSessionService;
+
+    @MockBean
+    private InactiveMemberAccessLogService inactiveMemberAccessLogService;
 
     @BeforeEach
     void allowTestSession() {

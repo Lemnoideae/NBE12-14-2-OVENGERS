@@ -1,5 +1,7 @@
 package com.ovengers.slotkey.notification;
 
+import com.ovengers.slotkey.access.service.InactiveMemberAccessLogService;
+
 import com.ovengers.slotkey.global.config.SecurityConfig;
 import com.ovengers.slotkey.global.config.ClockConfig;
 import com.ovengers.slotkey.auth.service.AuthSessionService;
@@ -52,6 +54,9 @@ class NotificationControllerTest {
     private NotificationQueryService service;
     @MockBean
     private AuthSessionService authSessionService;
+
+    @MockBean
+    private InactiveMemberAccessLogService inactiveMemberAccessLogService;
 
     @BeforeEach
     void allowTestSession() {

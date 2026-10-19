@@ -1,5 +1,7 @@
 package com.ovengers.slotkey.credit.controller;
 
+import com.ovengers.slotkey.access.service.InactiveMemberAccessLogService;
+
 import com.ovengers.slotkey.credit.dto.response.ChargeOrderResponse;
 import com.ovengers.slotkey.credit.dto.response.ChargeOrderConfirmResponse;
 import com.ovengers.slotkey.credit.entity.ChargeOrderStatus;
@@ -69,6 +71,9 @@ class ChargeOrderControllerTest {
 
     @MockBean
     private AuthSessionService authSessionService;
+
+    @MockBean
+    private InactiveMemberAccessLogService inactiveMemberAccessLogService;
 
     @BeforeEach
     void allowTestSession() {
