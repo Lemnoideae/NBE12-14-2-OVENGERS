@@ -1,5 +1,6 @@
 package com.ovengers.slotkey.reservation.controller;
 
+import com.ovengers.slotkey.access.service.InactiveMemberAccessLogService;
 import com.ovengers.slotkey.auth.service.AuthSessionService;
 import com.ovengers.slotkey.global.config.ClockConfig;
 import com.ovengers.slotkey.global.config.SecurityConfig;
@@ -73,6 +74,9 @@ class ReservationControllerTest {
 
     @MockBean
     private AuthSessionService authSessionService;
+
+    @MockBean
+    private InactiveMemberAccessLogService inactiveMemberAccessLogService;
 
     @Test
     @DisplayName("예약 결제 시 멱등키 헤더가 없으면 400과 전용 오류 코드를 반환하고 결제를 수행하지 않는다")

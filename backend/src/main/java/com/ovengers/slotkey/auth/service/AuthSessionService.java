@@ -38,16 +38,43 @@ public class AuthSessionService {
         if (sessionId == null || sessionId.isBlank()) {
             return ValidationResult.INVALID;
         }
+
         try {
-            return authSessionRepository.isUsable(
+            LocalDateTime now =
+                    LocalDateTime.now(clock);
+
+            boolean usable = authSessionRepository.isUsable(
                     sessionId,
                     memberId,
-                    LocalDateTime.now(clock),
+                    now,
                     MemberStatus.ACTIVE
-            ) ? ValidationResult.VALID : ValidationResult.INVALID;
+            );
+
+            if (usable) {
+                return ValidationResult.VALID;
+            }
+
+            // 인증 실패 시 세션 소유자의 현재 비활성 여부 확인
+            boolean inactiveMember = authSessionRepository
+                    .findMemberStatusForAccessAttempt(
+                            sessionId,
+                            memberId,
+                            now
+                    )
+                    .filter(status -> status != MemberStatus.ACTIVE)
+                    .isPresent();
+
+            if (inactiveMember) {
+                return ValidationResult.MEMBER_INACTIVE;
+            }
+
+            return ValidationResult.INVALID;
         } catch (DataAccessException | PersistenceException | TransactionException failure) {
-            log.error("Authentication session lookup failed; rejecting request (causeType={})",
-                    failure.getClass().getSimpleName());
+            log.error(
+                    "Authentication session lookup failed; rejecting request (causeType={})",
+                    failure.getClass().getSimpleName()
+            );
+
             return ValidationResult.UNAVAILABLE;
         }
     }
@@ -66,6 +93,7 @@ public class AuthSessionService {
     public enum ValidationResult {
         VALID,
         INVALID,
+        MEMBER_INACTIVE,
         UNAVAILABLE
     }
 }

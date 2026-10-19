@@ -1,5 +1,7 @@
 package com.ovengers.slotkey.global.security;
 
+import com.ovengers.slotkey.access.service.InactiveMemberAccessLogService;
+
 import com.ovengers.slotkey.global.config.SecurityConfig;
 import com.ovengers.slotkey.global.config.ClockConfig;
 import com.ovengers.slotkey.global.security.jwt.JwtProvider;
@@ -93,6 +95,11 @@ class ErrorDispatchSecurityIntegrationTest {
             when(service.validate(anyString(), anyLong()))
                     .thenReturn(AuthSessionService.ValidationResult.VALID);
             return service;
+        }
+
+        @Bean
+        public InactiveMemberAccessLogService inactiveMemberAccessLogService() {
+            return mock(InactiveMemberAccessLogService.class);
         }
     }
 

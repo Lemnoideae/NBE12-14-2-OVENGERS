@@ -1,32 +1,39 @@
 package com.ovengers.slotkey.global.security;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ovengers.slotkey.access.service.InactiveMemberAccessLogService;
+import com.ovengers.slotkey.auth.service.AuthSessionService;
 import com.ovengers.slotkey.global.common.response.ApiResponse;
 import com.ovengers.slotkey.global.error.ErrorCode;
 import com.ovengers.slotkey.global.security.jwt.JwtProvider;
-import com.ovengers.slotkey.auth.service.AuthSessionService;
+import com.ovengers.slotkey.member.entity.MemberRole;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
-import com.ovengers.slotkey.member.entity.MemberRole;
 
 import java.io.IOException;
+import java.time.Clock;
+import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.Set;
 
+@Slf4j
 @RequiredArgsConstructor
 public class CustomAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtProvider jwtProvider;
     private final ObjectMapper objectMapper;
     private final AuthSessionService authSessionService;
+    private final InactiveMemberAccessLogService inactiveMemberAccessLogService;
+    private final Clock clock;
 
     // 액세스 토큰 검사를 생략할 POST 요청
     private static final Set<String> PUBLIC_AUTH_PATHS = Set.of(
@@ -83,8 +90,7 @@ public class CustomAuthenticationFilter extends OncePerRequestFilter {
             return;
         }
 
-        // 4. 검증된 JWT 정보로 인증 정보 생성
-        // 검증된 JWT 정보로 인증한다. 회원 DB는 조회하지 않는다.
+        // 4. 검증된 JWT에서 회원 정보 추출 후 DB 세션·회원 상태 검증
         AuthPrincipal principal = extractPrincipal(payload);
 
         if (principal == null) {
@@ -93,19 +99,45 @@ public class CustomAuthenticationFilter extends OncePerRequestFilter {
         }
 
         Object sessionId = payload.get("sid");
+
         if (!(sessionId instanceof String sid)) {
             writeError(response, ErrorCode.INVALID_ACCESS_TOKEN);
             return;
         }
 
         AuthSessionService.ValidationResult sessionResult =
-                authSessionService.validate(sid, principal.memberId());
+                authSessionService.validate(
+                        sid,
+                        principal.memberId()
+                );
+
         if (sessionResult == AuthSessionService.ValidationResult.UNAVAILABLE) {
-            writeError(response, ErrorCode.AUTHENTICATION_SERVICE_UNAVAILABLE);
+            writeError(
+                    response,
+                    ErrorCode.AUTHENTICATION_SERVICE_UNAVAILABLE
+            );
             return;
         }
+
+        // 비활성 회원의 출입 시도를 기록한 뒤 기존 인증 실패 응답 반환
+        if (sessionResult == AuthSessionService.ValidationResult.MEMBER_INACTIVE) {
+            recordInactiveMemberAccessAttempt(
+                    request,
+                    principal.memberId()
+            );
+
+            writeError(
+                    response,
+                    ErrorCode.INVALID_ACCESS_TOKEN
+            );
+            return;
+        }
+
         if (sessionResult != AuthSessionService.ValidationResult.VALID) {
-            writeError(response, ErrorCode.INVALID_ACCESS_TOKEN);
+            writeError(
+                    response,
+                    ErrorCode.INVALID_ACCESS_TOKEN
+            );
             return;
         }
 
@@ -122,11 +154,40 @@ public class CustomAuthenticationFilter extends OncePerRequestFilter {
                 SecurityContextHolder.createEmptyContext();
 
         context.setAuthentication(authentication);
+
         SecurityContextHolder.setContext(context);
 
         // 7. 다음 필터로 이동
         // 이후 Spring Security가 API 접근 권한을 검사한다.
         filterChain.doFilter(request, response);
+    }
+
+    // 출입 검증 요청에 한해서 비활성 회원의 거절 로그 기록
+    private void recordInactiveMemberAccessAttempt(
+            HttpServletRequest request,
+            Long memberId
+    ) {
+        if (!"POST".equals(request.getMethod())
+                || !"/api/v1/door-access/verify".equals(
+                request.getServletPath()
+        )) {
+            return;
+        }
+
+        try {
+            inactiveMemberAccessLogService.record(
+                    memberId,
+                    LocalDateTime.now(clock)
+            );
+        } catch (RuntimeException e) {
+            // 로그 저장이 실패해도 인증 차단은 유지
+            // 토큰이나 요청 본문이 포함될 수 있는 예외 메시지는 기록하지 않음
+            log.error(
+                    "비활성 회원 출입 로그 저장 실패 - memberId: {}, causeType: {}",
+                    memberId,
+                    e.getClass().getSimpleName()
+            );
+        }
     }
 
     // JWT에 필요한 정보가 없거나 형식이 잘못되면 인증하지 않는다.
