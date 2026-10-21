@@ -20,7 +20,7 @@ docker compose up -d
 - 컨테이너명: `slotkey-mysql`, 포트: `3306`, DB: `slotkey`, 계정: `root` / `root`
 
 ### 2. 백엔드 서버 기동
-로컬 프로필은 `backend/.env`를 자동으로 읽습니다. 토스 승인·조회를 사용할 때만 `.env`의 `TOSS_PAYMENTS_SECRET_KEY` 주석을 해제하고 테스트 시크릿 키를 넣습니다. 키와 Authorization 헤더는 로그나 저장소에 남기지 않습니다.
+`backend` 디렉터리에서 실행하면 로컬 프로필이 `.env`를 읽습니다. JWT 키뿐 아니라 아래 표의 이메일 인증·SMTP 필수값도 준비해야 합니다. 설정 방법은 [Gmail SMTP 안내](../docs/operations/gmail-smtp-setup.md)를 따릅니다. 토스 승인·조회를 사용할 때만 `.env`의 `TOSS_PAYMENTS_SECRET_KEY` 주석을 해제하고 테스트 시크릿 키를 넣습니다. 키와 Authorization 헤더는 로그나 저장소에 남기지 않습니다.
 
 ```bash
 ./gradlew bootRun
@@ -47,9 +47,15 @@ docker compose up -d
 
 ## 환경변수
 
+기능 동결 커밋 `d1a15ec`의 `application.yml` 기준이다. 실제 비밀값은 커밋하지 않는다.
+
 | 이름 | 필수 여부 | 설명 |
 | --- | --- | --- |
 | `JWT_SECRET_KEY` | **예** (Spring Boot 필수) | JWT 서명 키. 기본값이 없어 미설정 시 기동에 실패합니다. HS256이라 **32바이트 이상** |
+| `SPRING_MAIL_USERNAME` | **예** | SMTP 로그인용 Gmail 주소 |
+| `SPRING_MAIL_PASSWORD` | **예** | Gmail 앱 비밀번호 |
+| `VERIFICATION_MAIL_FROM` | **예** | 발신 주소. `SPRING_MAIL_USERNAME`과 동일하게 설정 |
+| `VERIFICATION_HASH_SECRET` | **예** | 이메일 인증번호·증표 검증용 HMAC 비밀키. 32바이트 이상을 Base64 인코딩 |
 | `DB_PASSWORD` | **예** (Docker Compose 필수) / 불필요 (Spring local) | `backend/docker-compose.yml` 기동 시 MySQL root 비밀번호로 필수(`backend/.env`). Spring Boot 로컬 실행 시에는 `application-local.yml`의 기본값(`root`)이 적용되므로 Spring 프로세스 환경변수로는 불필요 |
 | `DB_URL` / `DB_USERNAME` | 불필요 (로컬) / **예** (배포) | 로컬에서는 `application-local.yml`이 localhost:3306/slotkey (`root`)로 덮어쓰므로 불필요. 배포 프로필에서만 필요 |
 | `CORS_ALLOWED_ORIGINS` | 아니오 | 미설정 시 `http://localhost:3000` |
@@ -57,7 +63,7 @@ docker compose up -d
 
 로컬 DB 접속 정보(`root` / `root`, 스키마 `slotkey`)는 `application-local.yml` 에 있습니다.
 
-결제창을 포함한 로컬 성공 흐름은 [`tools/pg-sandbox`](../tools/pg-sandbox/README.md)에서 수동 검증합니다. 이 도구는 운영 코드와 `frontend/` 앱에 포함되지 않습니다.
+기존 문서는 결제창 수동 검증 도구로 `tools/pg-sandbox`를 참조했으나, 현재 작업 트리에 해당 README가 없어 실행 안내 링크로 제공하지 않습니다. 충전 흐름과 과거 검증 기록은 [PG 충전 문서](../docs/decisions/pg-charge.md)를 참고합니다. 이번 문서 갱신에서 결제창을 새로 실행 검증하지 않았습니다.
 
 ## 알아둘 점
 

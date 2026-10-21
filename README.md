@@ -2,6 +2,8 @@
 
 > 시간을 Slot으로 나누고, 예약한 Slot이 하나의 Key가 된다.
 
+> 구현 기준: 기능 동결 커밋 `d1a15ec` / 문서 갱신: 2026-10-21. 문서 변경은 기능 동결 기준을 변경하지 않으며 운영 배포를 새로 검증한 기록이 아닙니다.
+
 **Slot Key**는 회의실·공유오피스를 30분 단위로 예약하고, 예약 상태와 이용 시간에 따라 출입 권한을 제공하는 서비스입니다.
 
 주요 도입 고객은 **다수의 오피스 계열 건물을 보유한 건물주**이고, 공간을 찾아 예약하는 회원은 최종 이용자입니다. 건물주에게는 공간과 예약을 운영할 수 있는 백오피스 수단을, 이용자에게는 공간 탐색부터 예약·이용까지 이어지는 흐름을 제공하려는 방향입니다. 현재 구현은 단일 관리자 백오피스로 동작하며, 건물주별 관리 분리 기능은 아직 구현되지 않은 과제입니다([서비스 대상과 가치 가설](docs/product/requirements.md#서비스-대상과-가치-가설) 참고).
@@ -65,7 +67,8 @@
 | 예약 | 30분 단위 예약(HOLD → 결제 확정), 본인 예약 조회·취소·연장, 체크아웃(이용 완료) |
 | 크레딧 충전 | 토스페이먼츠 주문서형 결제위젯으로 크레딧 충전(1,000~100,000원, 100원 단위), 충전 주문 상태 조회, 결과가 불분명한 주문의 자동 복구, 예약 결제 시 잔액 부족이면 충전 안내 |
 | 출입 | 예약 기반 출입 키 발급·재발급·폐기, 모의 출입 검증(최초 체크인 및 재입장 판정), 출입 기록 조회 |
-| 관리자 | 대시보드 현황(서울 기준 활성 예약 및 통계), 공간 등록·수정 및 대표 사진 업로드(5MB), 전체 회원 조회·정지·복구 및 크레딧 지급, 전체 예약 조회 및 사유 기반 강제 취소, 감사 로그 조회 |
+| 관리자 | 대시보드 현황(서울 기준 활성 예약 및 통계), 공간 등록·수정 및 대표 사진 업로드(5MB), 전체 회원 조회·회원별 상세와 예약·크레딧·상태 변경 이력 조회, 정지·복구 및 크레딧 지급, 전체 예약 조회 및 사유 기반 강제 취소, 감사 로그 조회 |
+| 대기·알림 | 점유 구간 대기 신청·취소·조회, 슬롯 해제 시 빈자리 알림 저장·목록·미읽음 수·읽음 처리(Kafka 활성 환경), 예약은 선착순 |
 | 문의 | 회원 1:1 문의 작성·목록·상세·수정(답변 전), 관리자 전체 문의 목록·상세 및 답변 등록 |
 | 이력 | 예약 상태 전이 이력, 출입 시도 로그, 관리자 행위 감사 로그 기록 |
 
@@ -86,7 +89,7 @@
 1. **관리자 로그인**: 사전 등록된 관리자 계정(`admin000@sample.com`)으로 로그인
 2. **대시보드 모니터링**: 당일 서울 기준 활성 예약 건수, 신규 예약, 공간 통계 확인
 3. **공간 관리**: 신규 공간 등록 (`POST /admin/spaces`), 운영시간/요금/상태 수정 (`PATCH /admin/spaces/{id}`), 대표 사진 파일 업로드 (`PUT /admin/spaces/{id}/image`)
-4. **회원 관리**: 회원 목록 조회, 악성 회원 계정 정지(`suspend`)/복구(`restore`), 필요 시 크레딧 수동 지급 (`POST /admin/members/{id}/credits`)
+4. **회원 관리**: 회원 목록·상세와 예약·크레딧·상태 변경 이력 조회, 악성 회원 계정 정지(`suspend`)/복구(`restore`), 필요 시 크레딧 수동 지급 (`POST /admin/members/{id}/credits`)
 5. **예약 관리**: 전체 회원 예약 목록 및 상태 이력 조회, 불가피한 사유 발생 시 사유 입력 후 강제 취소 (`POST /admin/reservations/{id}/force-cancel`)
 6. **감사 로그 추적**: 관리자 작업(공간 수정, 회원 정지, 크레딧 지급, 강제 취소 등)에 대한 페이징 감사 로그 API 제공 (`GET /admin/audit-logs`) ※ 백엔드 API 제공 범위이며 별도 프론트엔드 관리자 UI 조회 화면은 미구현
 7. **1:1 문의 응대**: 접수된 사용자 문의 목록 확인 및 관리자 답변 등록 (`POST /admin/inquiries/{id}/answer`)
@@ -95,7 +98,7 @@
 
 - 스마트락 하드웨어 연동 — 모의 출입 API로 대체
 - PG는 **크레딧 충전에만** 토스페이먼츠 테스트 환경으로 연동. 예약을 카드로 직접 결제하는 방식은 크레딧 원장 단일화 결정에 따라 채택하지 않음
-- PG 웹훅, 충전 취소(환불), 정기결제 — 후속 과제
+- PG 웹훅 수신·저장·처리는 구현되어 있습니다. 충전 취소(환불)·정기결제는 후속 과제입니다.
 - 다중 건물주별 격리 관리 기능 (현재는 단일 백오피스 관리자 체계)
 - 팀 리더의 대리 예약과 대리 취소, 관리자의 타인 예약 일반 대리 취소/출입 키 발급
 - 회원 등급, 멤버십, 쿠폰, 할인 등 동적 요금 정책
@@ -108,7 +111,7 @@
 | 영역 | 기술 | 사용 목적 및 버전 |
 | --- | --- | --- |
 | Backend | Spring Boot 3.3.4, Java 21 | RESTful API 서비스 및 도메인 비즈니스 로직 구성 |
-| Security | Spring Security 6.3, JJWT 0.12.6 | 무상태 JWT 인증 및 RBAC 인가 제어 (BCrypt 암호화) |
+| Security | Spring Security 6.3, JJWT 0.12.6 | JWT + DB 세션 인증 및 RBAC 인가 제어 (BCrypt 암호화) |
 | Persistence | Spring Data JPA, Hibernate 6.5, Flyway 10.15 | 데이터 영속성 관리 및 버전 기반 DB 마이그레이션 (`ddl-auto: none`) |
 | Database | MySQL 8.4 (utf8mb4) | 회원, 공간, 예약, 슬롯, 원장, 토큰, 감사 로그 저장 |
 | Payment | Toss Payments SDK v2(주문서형 결제위젯) `@tosspayments/tosspayments-sdk ^2.9.0`, Core API(승인·조회) | 테스트 키 기반 크레딧 충전, 서버 승인과 결제 조회 복구 |
@@ -348,7 +351,7 @@ stateDiagram-v2
 
 ## 🔐 인증 및 인가
 
-Access JWT 페이로드에 포함된 `id`, `email`, `role`, 만료 시각을 검증하여 인증하며, 보호 API 요청마다 회원 DB를 재조회하지 않습니다. 예약 관련 작업에서는 예약 소유권과 상태를 서비스 레이어에서 추가로 검사합니다.
+Access JWT의 서명·만료와 `id`, `email`, `role`, `sid`를 검증하고, 보호 API 요청에서 DB 세션의 회원 귀속·만료·폐기 여부 및 회원 ACTIVE 상태를 확인합니다. 예약 관련 작업에서는 예약 소유권과 상태를 서비스 레이어에서 추가로 검사합니다.
 
 | 작업 | 비회원 | 회원 (USER) | 관리자 (ADMIN) |
 | --- | --- | --- | --- |
@@ -365,7 +368,7 @@ Access JWT 페이로드에 포함된 `id`, `email`, `role`, 만료 시각을 검
 ### 보안 원칙
 
 - 계정 정지는 기존 예약과 결제를 자동 취소하지 않습니다.
-- 계정이 정지(`SUSPENDED`)되어도 기존 Access Token은 만료 전까지 유효하지만, 토큰 재발급(`POST /api/v1/auth/refresh`) 시 회원 DB 조회를 거쳐 `ACCOUNT_INACTIVE`(403)로 차단됩니다 (Access Token 즉시 차단은 추후 과제).
+- 계정 정지 시 로그인 세션·RT를 폐기합니다. 보호 API는 DB 세션과 회원 상태를 검증하므로 기존 AT도 이후 인증 검사에서 401 `INVALID_ACCESS_TOKEN`으로 거부됩니다. 비활성 회원의 출입 검증 요청은 조건을 충족하면 DENY / MEMBER_INACTIVE 로그를 남깁니다([출입키 정책](docs/decisions/access-key-policy.md)).
 - 회원가입 요청으로 관리자 역할을 지정할 수 없도록 합니다.
 - 일반 회원의 타인 예약 접근은 `FORBIDDEN_NOT_OWNER`(403)로 차단하고, 존재하지 않는 예약 접근은 `RESERVATION_NOT_FOUND`(404)로 처리합니다.
 - 관리자 계정 정지와 역할 변경은 MVP 범위에서 제외합니다.
@@ -442,6 +445,7 @@ Authorization: Bearer {accessToken}
 | 대기 | `GET` | `/waitlist/me` | 내 활성 대기 목록 |
 | 알림 | `GET` | `/notifications` | 내 알림 목록 (최신순, 페이징) |
 | 알림 | `GET` | `/notifications/unread-count` | 안 읽은 알림 개수 |
+| 알림 | `POST` | `/notifications/read-all?upToId=...` | 본인의 미읽음 알림 중 상한 이하를 일괄 읽음 처리 |
 
 - 공간 및 슬롯 조회는 비로그인 상태에서도 가능합니다.
 - 결제 확정(`/pay`) 요청에는 중복 처리를 방지하는 `Idempotency-Key` 헤더가 필수입니다.
@@ -455,8 +459,8 @@ Authorization: Bearer {accessToken}
 
 | 계층 | 사용 도구 | 검증 대상 및 실측 결과 |
 | --- | --- | --- |
-| 백엔드 단위·통합 테스트 | JUnit 5, Mockito, Testcontainers MySQL 8.4 | 도메인 단위 로직, 트랜잭션 전파, DB 유니크 제약, 비관적 락 동시성, 다중 스레드 멱등성 검증<br>👉 **83개 테스트 클래스 / 654개 테스트 전원 통과** (실패 0, 에러 0, 스킵 0) |
-| 프론트엔드 단위 테스트 | Node.js Test Runner (`node --test`) | API 클라이언트 에러 처리, 출입 키 저장/파싱, 유효성 검사 등<br>👉 **45개 테스트 전원 통과** (pass 45, fail 0) |
+| 백엔드 단위·통합 테스트 | JUnit 5, Mockito, Testcontainers MySQL 8.4 | 도메인 단위 로직, 트랜잭션 전파, DB 유니크 제약, 비관적 락 동시성, 다중 스레드 멱등성 검증<br>기존 집계: 83개 클래스 / 654개 테스트 통과. 기능 동결 기준 실행 기록은 [테스트 결과](docs/testing/test-results.md)의 2026-10-20 `d1a15ec` 기록(1,048개 통과)을 참조. 이번 문서 수정에서 재실행하지 않음 |
+| 프론트엔드 단위 테스트 | Node.js Test Runner (`node --test`) | API 클라이언트 에러 처리, 출입 키 저장/파싱, 유효성 검사 등<br>과거 README 집계: 45개 통과(pass 45, fail 0). 기능 동결 기준의 최신 프론트 실행 수치를 뜻하지 않으며, 이번 문서 수정에서 재실행하지 않음 |
 | 정적 분석 및 컴파일 | ESLint, TypeScript (`tsc`) | 프론트엔드 린트 및 타입 무결성 검증 통과 (`npm run lint`, `npx tsc --noEmit`) |
 | API 문서 자동 검증 | MockMvc, Springdoc OpenAPI | Swagger UI 경로 및 OpenAPI 사양 생성 자동 검증 통과 (`/swagger-ui/index.html`) |
 | 운영 배포 및 E2E 브라우저 | — | AWS 클라우드 배포 실측 및 E2E 브라우저 자동화는 추후 과제 |
@@ -473,7 +477,7 @@ Authorization: Bearer {accessToken}
 | 요청 멱등성 | 동일한 `Idempotency-Key`로 결제를 재전송해도 크레딧이 1회만 차감되고 캐시된 200 응답 반환 | `ReservationIdempotencyIntegrationTest` |
 | 결제 부분 실패 | 잔액 부족 등으로 결제 실패 시 결제만 롤백되고 예약은 `HELD`로 남아 10분 내 재시도 가능 | `ReservationPaymentIntegrationTest` |
 | 요금 보존 | 공간의 시간당 요금이 변경되어도 기존 확정 예약의 스냅샷 요금 불변 | `ReservationPaymentIntegrationTest` |
-| 계정 정지 | 계정이 정지된 회원의 토큰 재발급(refresh) 요청 시 `ACCOUNT_INACTIVE`(403) 즉시 차단 | `AuthControllerTest` |
+| 계정 정지 | 정지 처리로 폐기된 기존 RT의 토큰 재발급(refresh) 요청을 `INVALID_REFRESH_TOKEN`(401)로 차단 | `AuthControllerTest` |
 | 출입 토큰 무효화 | 예약 취소, 재발급, 체크아웃 직후 기존 활성 토큰 폐기 및 출입 거절 | `DoorAccessControllerTest`, `DoorAccessServiceTest` |
 | 시간 경계 검증 | 최초 체크인 허용 구간 `[시작, 시작+15분]`(앞 여유 0분) 및 재입장 `(체크인, 종료)` 엄격 판정 | `DoorAccessTimePolicyTest` |
 | 소유권 및 인가 | 일반 회원/관리자 모두 타인 명의 예약 취소 불가, 관리자는 사유 동반 `force-cancel`만 가능 | `ReservationServiceTest`, `AdminReservationServiceTest` |
@@ -540,7 +544,7 @@ NBE12-14-2-OVENGERS/
 cd backend
 cp -n .env.example .env
 
-# .env.example에는 로컬 개발용 DB_PASSWORD=root 및 기본 JWT_SECRET_KEY가 이미 정의되어 있습니다.
+# .env.example을 복사한 뒤 필수 비밀값을 로컬 환경에 설정합니다.
 # 필요한 경우 .env 파일을 열어 환경변수 값을 조정합니다.
 
 # 2) MySQL 8.4 컨테이너 실행 후 루트로 복귀
@@ -551,12 +555,12 @@ cd ..
 - 포트: `3306` (기본 계정: `root` / 비밀번호: `root`, 데이터베이스: `slotkey`)
 
 #### 3. 백엔드 스키마 생성 및 1차 기동
-`backend/build.gradle`에는 `.env` 자동 로딩 설정이 없으므로, 프로세스 기동 시 필수 환경변수인 `JWT_SECRET_KEY`를 직접 전달합니다.
+`application-local.yml`은 작업 디렉터리의 `.env`를 `optional:file:.env[.properties]`로 읽습니다. `backend` 디렉터리에서 local 프로필로 실행하며 `JWT_SECRET_KEY`, `VERIFICATION_HASH_SECRET`, 메일 설정(`SPRING_MAIL_USERNAME`, `SPRING_MAIL_PASSWORD`, `VERIFICATION_MAIL_FROM`)을 준비합니다. 실제 값은 커밋하지 않습니다. 자세한 설정은 [메일 설정 안내](docs/operations/gmail-smtp-setup.md)를 따릅니다.
 
 ```bash
 cd backend
-# 백엔드 서버 1차 기동 (Flyway V1~V13 자동 마이그레이션 수행)
-JWT_SECRET_KEY='local-dev-only-secret-key-must-be-32bytes-or-longer' ./gradlew bootRun
+# 백엔드 서버 1차 기동 (Flyway V1~V26 자동 마이그레이션 수행)
+./gradlew bootRun --args='--spring.profiles.active=local'
 ```
 - 백엔드 서버 포트: `8080`
 - Swagger UI 접속 주소: `http://localhost:8080/swagger-ui/index.html`
@@ -585,7 +589,7 @@ bash data-setting/setup.sh setup
 샘플 데이터 적재가 완료되면 백엔드 서버를 다시 기동하여 실행 상태를 유지합니다:
 ```bash
 cd backend
-JWT_SECRET_KEY='local-dev-only-secret-key-must-be-32bytes-or-longer' ./gradlew bootRun
+./gradlew bootRun --args='--spring.profiles.active=local'
 ```
 
 #### 5. 프론트엔드 기동 (새 터미널)
@@ -621,7 +625,7 @@ npm run dev
 - Merge 방식은 커밋 히스토리를 깔끔하게 유지하기 위해 `Squash and merge`를 사용합니다.
 
 ### 브랜치 전략
-기능 개발은 `feat/* → dev`, 배포 반영은 `dev → main` PR로 진행합니다.
+기능 개발은 `feat/* → dev` PR로 진행합니다. 기능 동결 기준 배포 워크플로는 `dev` push를 대상으로 실행하며, EC2의 `slotkey` systemd 서비스를 재시작합니다. 브랜치 협업 그림과 실제 배포 트리거는 구분하며, 상세 절차는 [배포 문서](docs/operations/deploy-cicd.md)를 따릅니다.
 
 ```
 main
@@ -662,6 +666,12 @@ DDL은 Flyway로 버전 관리하며, `backend/src/main/resources/db/migration/`
 | `V11` | `V11__add_member_withdrawn_at.sql` | `member` | 탈퇴 시각 |
 | `V12` | `V12__add_reservation_search_indexes.sql` | `reservation` | 관리자 예약 검색 인덱스 |
 | `V13` | `V13__create_charge_order_table.sql` | `charge_order`, `credit_transaction` | PG 충전 주문, 충전 원장 연결 |
+| `V14`~`V16` | 로컬 자격 증명 분리·이메일 인증 시각·인증 테이블 | 인증 | 이메일 인증·가입/복구 증표 |
+| `V17`~`V20` | 대기열·Outbox·처리 이벤트·알림 테이블 | 대기 및 이벤트 전달 | 빈자리 알림 |
+| `V21` | `V21__add_payment_method_to_charge_order.sql` | `charge_order` | 결제수단 |
+| `V22` | `V22__create_space_ranking_snapshot.sql` | 랭킹 스냅숏 | 확정 기간 랭킹 |
+| `V23` | `V23__create_pg_webhook_event_table.sql` | PG 웹훅 이벤트 | 수신 이벤트 저장 |
+| `V24`~`V26` | 로그인 세션·RT 소비 시각·로그인 시도 버킷 | 인증 V2 | 세션 검증·RT 회전·로그인 제한 |
 
 ## 👥 팀원 및 역할
 
@@ -688,12 +698,12 @@ DDL은 Flyway로 버전 관리하며, `backend/src/main/resources/db/migration/`
 - [x] 크레딧 잔액 부족 시 결제만 롤백되고 예약은 `HELD`로 남아 재시도할 수 있다. (트랜잭션 분리 통합 테스트 통과)
 - [x] 시작+15분까지 미체크인이면 `NO_SHOW`로 전이되고 슬롯이 반환된다(환불 없음).
 - [x] 예약 취소 및 이용 종료가 출입 차단에 반영된다. (체크아웃 즉시 토큰 폐기, 종료 후 발급 거절 검증 통과)
-- [x] 계정 정지 시 신규 로그인 및 Refresh Token 재발급이 차단된다. (로그인 및 재발급 시 ACCOUNT_INACTIVE 403 차단 통과)
-- [ ] 계정 정지 즉시 기존 발급된 Access Token 및 출입 키가 차단된다. (무상태 JWT 만료 전 API 허용 및 출입 검증 시 회원 상태 미검사 한계로 향후 보강 과제)
+- [x] 계정 정지 시 신규 로그인 및 Refresh Token 재발급이 차단된다. 로그인은 `ACCOUNT_INACTIVE`(403), 정지 처리로 폐기된 기존 RT의 재발급은 `INVALID_REFRESH_TOKEN`(401)로 거절한다.
+- [x] 정지 후 기존 AT의 보호 API 요청을 DB 세션·회원 상태로 차단한다. 출입 검증 요청은 MEMBER_INACTIVE 로그를 기록하며 체크인하지 않는다. 이는 출입 키 자체의 일괄 폐기와 구분한다.
 - [x] 공간 요금 변경 후에도 기존 예약의 스냅샷 요금이 영구 보존된다.
 - [x] 일반 회원과 관리자 모두 예약 소유권 정책을 준수한다. (타인 취소 불가, 관리자 강제취소 분리)
-- [x] 실제 MySQL 환경(Testcontainers)에서 통합·동시성 테스트가 통과한다. (백엔드 654개, 프론트 45개 전원 통과)
-- [x] 루트 README, 세부 문서(`docs/`), 스키마, 소스 코드 간 정합성이 일치한다. (대단위 1~7 문서 검토 승인)
+- [x] MySQL(Testcontainers) 통합·동시성 테스트 실행 기록이 있다. 실행 날짜·커밋·수치는 [테스트 결과](docs/testing/test-results.md)를 따른다.
+- [ ] 문서와 구현의 정합성을 계속 점검한다. 필수 쿼리 파라미터 누락의 오류 응답 등 실행 확인이 필요한 항목은 API 명세에 별도 표시한다.
 - [ ] AWS 클라우드 배포 환경에서 회원가입 → 예약 → 출입 → 이용 완료 흐름이 동작한다. (인프라 설계 완료, 운영 실측 미검증)
 - [ ] 임의 시점에 `SUM(credit_transaction.amount) == member.balance`가 성립한다. (상태변경-증가 경합 외 DB 전체 합계 불변식 영속성 검증은 향후 과제)
 - [ ] 공개 클라우드 도메인 URL 및 시연 영상이 제공된다. (로컬 Swagger UI 자동화 검증 완료, 공개 배포/영상 별도 제공 예정)
@@ -705,7 +715,7 @@ DDL은 Flyway로 버전 관리하며, `backend/src/main/resources/db/migration/`
 - [예약 동시성 제어 정책](docs/decisions/reservation-concurrency.md): 공간 공유 락 + 슬롯 유니크 제약
 - [예약 결제 멱등성 정책](docs/decisions/reservation-idempotency.md): Idempotency-Key 헤더 기반 200 OK 응답 캐싱
 - [출입 키 발급 및 검증 정책](docs/decisions/access-key-policy.md): 예약당 활성 토큰 1개 제약, 체크인 시간 정책, 토큰 해시 저장
-- [인가 정책 및 권한 분리](docs/decisions/authorization-policy.md): 무상태 JWT 인증 및 5대 축 인가 검증
+- [인가 정책 및 권한 분리](docs/decisions/authorization-policy.md): JWT + DB 세션 인증 및 5대 축 인가 검증
 - [관리자 공간 대표 사진 안내](docs/api/admin-space-image-upload.md): 5MB 제한, Content-Type 검증, 로컬 정적 서빙 및 MVC 흐름
 - [1:1 문의 기능 요구사항](docs/product/requirements.md#후속-추가-기능-mvp-이후-확장): 회원 질문-관리자 단일 답변 구조 및 스키마 정책
 - [PG 크레딧 충전](docs/decisions/pg-charge.md): 승인 3단계와 트랜잭션 경계, 결과 미확정 복구, 응답 정책

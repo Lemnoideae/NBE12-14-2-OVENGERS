@@ -1,5 +1,7 @@
 # SlotKey V2 인증 구현 해설 — 1번 이슈: DB 로그인 세션
 
+> **현재 구현 안내 (문서 갱신: 2026-10-21)**: 기능 동결 커밋 `d1a15ec`에는 PR #350의 DB 세션·RT 회전·로그인 제한이 병합돼 있다. 아래 미병합·단계별 테스트·경합 설명은 각 커밋 당시의 기록이며 현재 계약은 [API 명세](../api/api-spec.md)와 [인증 정책](../decisions/authentication-policy.md)을 따른다. 과거 실행 날짜·커밋·수치는 유지하며 이번에 테스트를 재실행하지 않았다.
+
 > 검토 시점: 2026-10-18 (KST)
 > 구현 기준: 브랜치 `auth/improvement/v2`의 커밋 `e671c475be90c90804712a1866e708bc7d145432`(로컬 커밋 완료, 미Push·미병합·미배포). 부모 커밋은 dev의 `16b9ead`다.
 > 상태: 1번 이슈 구현·회귀 검증·코드 리뷰 완료, 로컬 커밋 `e671c47`, 미Push·미병합·미배포(2026-10-18). 2번 이슈 구현·회귀 검증·코드 리뷰 완료, 로컬 커밋 `02c3557`, 미Push·미병합·미배포. 3번 이슈 구현·관련 검증·코드 리뷰 완료, 로컬 커밋 `a29dfc9`, 미Push·미병합·미배포. 근거와 남은 배포 전 확인은 [V2 계획 §0](../plans/auth/v2-plan.md#0-진행-상태-2026-10-18-리뷰-기준).
@@ -29,7 +31,7 @@ flowchart TD
 | `auth_session` | 신규. `id`(UUID 문자열, PK), `member_id`(FK → `member`), `created_at`, `expires_at`, `revoked_at` | 인덱스 `idx_auth_session_member_id`. 만료는 생성 시 +24시간으로 고정하며 갱신하지 않는다 |
 | `refresh_token` | `auth_session_id VARCHAR(36) NOT NULL` + FK → `auth_session`, 인덱스 추가 | 엔티티 `RefreshToken.authSession`(`@ManyToOne`, optional=false) |
 
-V24는 먼저 `DELETE FROM refresh_token`으로 **전환 전 V1 RT 기록을 삭제**한 뒤 테이블·컬럼·FK를 만든다. 이 삭제는 V1 → V2 전환 시 한 번만 실행되는 합의된 정책이며, 이후 RT를 사용·교체할 때 기록을 지우는 정책이 아니다(사용한 RT 기록 보존 방식은 3번 이슈에서 정한다). 테이블·제약은 [ERD](erd.md)에 "V24, dev 병합 전" 표시로, API 계약 변화는 [API 명세 §2-5](../api/api-spec.md#2-5-v2-1번-변경--db-로그인-세션-dev-병합-전)에 반영했다.
+V24는 먼저 `DELETE FROM refresh_token`으로 **전환 전 V1 RT 기록을 삭제**한 뒤 테이블·컬럼·FK를 만든다. 이 삭제는 V1 → V2 전환 시 한 번만 실행되는 합의된 정책이며, 이후 RT를 사용·교체할 때 기록을 지우는 정책이 아니다(사용한 RT 기록 보존 방식은 3번 이슈에서 정한다). 테이블·제약은 현재 병합 상태를 반영한 [ERD](erd.md)에, API 계약 변화는 [API 명세 §2-5](../api/api-spec.md#2-5-v2-1번-변경--db-로그인-세션-dev-병합-전)에 반영했다.
 
 ## 3. 요청별 동작
 
@@ -59,7 +61,7 @@ V24는 먼저 `DELETE FROM refresh_token`으로 **전환 전 V1 RT 기록을 삭
 | 인증 최종 잠금 자동 정지 | `VerificationCheckService.suspendMemberIfNeeded` | 결과 값 반환으로 커밋된 뒤 Controller가 403 응답 |
 | 비밀번호 재설정 | `PasswordResetService.reset` | 비밀번호 변경·grant 소비와 함께(어느 단계 실패든 롤백) |
 
-refresh는 RT·세션을 잠금 없이 읽은 뒤 회원을 잠그므로, 재설정과 경합하면 이미 폐기된 세션의 `sid`로 AT를 발급할 수 있다. 그 AT는 다음 요청에서 401이고 RT 회전이 없어 새 RT도 없다. RT 회전(3번)에서는 잠금 후 재확인이 필요하다. 근거와 테스트 결과는 [V2 계획 §0](../plans/auth/v2-plan.md#0-진행-상태-2026-10-18-리뷰-기준).
+다음은 RT 회전 도입 전 1·2번 구현의 경합 설명이다. 현재 3번 구현은 §5-1의 잠금 후 재확인을 따른다. 당시 refresh는 RT·세션을 잠금 없이 읽은 뒤 회원을 잠그므로, 재설정과 경합하면 이미 폐기된 세션의 `sid`로 AT를 발급할 수 있다. 그 AT는 다음 요청에서 401이고 RT 회전이 없어 새 RT도 없다. RT 회전(3번)에서는 잠금 후 재확인이 필요하다. 근거와 테스트 결과는 [V2 계획 §0](../plans/auth/v2-plan.md#0-진행-상태-2026-10-18-리뷰-기준).
 
 ## 5-1. RT Rotation·재사용 탐지 (3번, 로컬 커밋 `a29dfc9`)
 

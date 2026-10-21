@@ -9,7 +9,9 @@ related: [reservation-concurrency.md, outbox-kafka.md, ../plans/space-ranking/00
 
 # 관리자 베스트 공간 랭킹을 매일 00시 확정값으로 제공
 
-> 1~4번과 6번은 구현 전에 쓰고, 5번의 "검증 결과"와 면접·발표용 정리는 구현 후(2026-10-16, 단계 1–8)에 채웠다. 설계 합의는 2026-10-16 사용자와의 질의응답(grill-me)으로 이루어졌다. 구현·검증 보고는 [lab/notes/space-ranking](../lab/notes/space-ranking/)에 있으며, **구현과 검증이 같은 세션이라 "자기검증"이다**(CI와 사람의 확인이 최종 안전망).
+> **과거 보고서 참조 안내**: 이 문서에서 언급하는 `docs/lab/notes/`의 보고서 원문은 기능 동결 커밋 `d1a15ec`에 포함되어 있지 않다. 보고서 이름과 당시 결과는 기존 문서의 기록으로 보존하며, 이번 갱신에서 원문을 확인하거나 테스트를 재실행했다는 뜻이 아니다. 해당 보고서 이름에는 링크를 제공하지 않는다.
+
+> 1~4번과 6번은 구현 전에 쓰고, 5번의 "검증 결과"와 면접·발표용 정리는 구현 후(2026-10-16, 단계 1–8)에 채웠다. 설계 합의는 2026-10-16 사용자와의 질의응답(grill-me)으로 이루어졌다. 기존 구현·검증 보고 참조는 lab/notes/space-ranking이었으며, **구현과 검증이 같은 세션이라 "자기검증"이다**(CI와 사람의 확인이 최종 안전망).
 
 ## 한 줄 요약
 
@@ -90,7 +92,7 @@ related: [reservation-concurrency.md, outbox-kafka.md, ../plans/space-ranking/00
 
 ### 검증 결과 (2026-10-16, 자기검증)
 
-- **전체 회귀**: `./gradlew cleanTest test` → 121 클래스 **942 tests, 실패 0, 오류 0, 건너뜀 11**(11건은 기존 `V2SecurityRedTest`의 `@Disabled`). 이 기능의 신규 테스트는 약 114개다. 프런트 `node --test` 75개 통과(착수 전 59 + 신규 16), `tsc` 오류 0, `eslint` 오류 0(경고 7은 착수 전과 동일), `next build` 성공. 보고서는 [step-1-3](../lab/notes/space-ranking/step-1-3.md), [step-4-5](../lab/notes/space-ranking/step-4-5.md), [step-6-7](../lab/notes/space-ranking/step-6-7.md), [step-8](../lab/notes/space-ranking/step-8.md).
+- **전체 회귀**: `./gradlew cleanTest test` → 121 클래스 **942 tests, 실패 0, 오류 0, 건너뜀 11**(11건은 기존 `V2SecurityRedTest`의 `@Disabled`). 이 기능의 신규 테스트는 약 114개다. 프런트 `node --test` 75개 통과(착수 전 59 + 신규 16), `tsc` 오류 0, `eslint` 오류 0(경고 7은 착수 전과 동일), `next build` 성공. 보고서는 step-1-3, step-4-5, step-6-7, step-8.
 - **충족한 계획 항목** (모두 실제 MySQL 8.4 Testcontainers, 시간은 주입한 `Clock`):
   - 계산·경계(`SpaceRankingConfirmServiceIntegrationTest` 19, `RankingPeriodTypeTest` 4): 23:59:59/00:00:00 자정 경계, 월요일 경계, 월·연도 경계, 연말·연초에 걸친 주, 자정을 가로지르는 예약이 시작일에 들어감, 일간 7개의 합 = 주간, 위약금 50% 취소(건수 제외·위약금은 수익)·전액 환불(행 없음)·NO_SHOW(환불 없음), **확정 후 환불이 환불일에 음수로 반영되고 지난 값은 불변**, 0 행 제외, INACTIVE 공간 포함, 계산 당시 `location` 저장, 멱등, 재계산 시 옛 행 제거, 빈 기간, 끝나지 않은 기간 확정 거부.
   - 보충·스케줄(`SpaceRankingBackfillServiceIntegrationTest` 5, `SpaceRankingSchedulerTest` 6): 빠진 일·주·월 채움, 진행 중 기간·31일 밖 미계산, **이미 확정된 기간은 원본이 바뀌어도 불변**, 두 번 실행해도 행 수 동일, 평일/월요일/1일/둘 다인 날의 확정 대상, 한 기간이 실패해도 나머지·보충 진행.
@@ -110,7 +112,7 @@ related: [reservation-concurrency.md, outbox-kafka.md, ../plans/space-ranking/00
 
 ### 검증자 검증 결과 (2026-10-17, 독립 검증)
 
-구현과 분리된 새 세션에서 검증했다. 전문은 [verify](../lab/notes/space-ranking/verify.md).
+구현과 분리된 새 세션에서 검증했다. 당시 보고서 참조는 verify.md였다.
 
 - **직접 실행**: 백엔드 `cleanTest test` 942 tests 실패 0 건너뜀 11, 프런트 75 통과, `tsc` 오류 0, `eslint` 오류 0(경고 7), `next build` 성공. 위 자기검증 수치와 일치.
 - **계산 추적**: 원장 부호(`charge` −, `refund` +, `penalize` −)로 `−SUM(amount)`가 맞고, 매출은 원장 `created_at`·건수는 `start_time`, 구간은 `[from, to)`, 주는 월요일 시작임을 코드로 확인. 규칙 1–7 위반, Lombok, 시크릿, 워크플로 변경 없음.

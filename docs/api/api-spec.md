@@ -1,12 +1,16 @@
 # Slot Key API 명세서
 
+> **구현 기준: 기능 동결 커밋 `d1a15ec` / 문서 갱신일: 2026-10-21**. 이번 변경은 코드 변경 없이 인증·오류 응답·Enum 설명을 정리한 문서 최신화이며, 기능 동결 기준을 변경하지 않는다. 아래 날짜별 갱신 기록은 당시 이력이며, 현재 계약은 본문의 API 설명을 따른다. 운영 배포 및 외부 서비스 실동작을 새로 검증한 기록은 아니다.
+
+> **2026-10-19 갱신**: 멱등키 헤더 누락·공통 서버 오류 응답 및 비활성 회원 출입 거절 로그를 구현 기준으로 반영했다. 출입 로그 변경의 배포 완료를 의미하지는 않는다.
+
 > claude.ai 프로젝트 문서 `claude/api-명세서.md` (v0.1, 2026-09-09, 기획서 확정본 기준) 동기화본. 구현 중 세부 규칙이 바뀌면 이 문서도 함께 갱신한다.
 > **2026-09-15 갱신**: `docs/core-domain-decisions.md`(확정본) 반영 — 예약 생성이 1단계(즉시 결제)에서 2단계(HOLD → 결제 확인)로 변경, `payment` 삭제·`credit_transaction` 도입, 연장/체크아웃/크레딧 지급 엔드포인트 신규, 도어 토큰 발급·체크인 시간 규칙 변경. 충돌 시 `core-domain-decisions.md`가 우선한다.
 > **2026-09-17 갱신 (docs/api)**: 실제 컨트롤러 코드 기준으로 동기화 — Base URL `/api/v1`, 취소 API `POST .../cancel`, 요청/응답 필드, 관리자 예약 목록 필터 미지원, 미구현 API 표시. **프론트는 이 문서를 기준으로 한다.** (claude.ai 프로젝트 문서 `claude/api-명세서.md`는 구버전 — 참고 금지)
 > **2026-09-24 갱신 (대단위 1)**: 컨트롤러·DTO·`SecurityConfig`·`ErrorCode` 전수 조사 기반 정합성 동기화 — 실제 응답 DTO 필드, 엔드포인트별 페이지네이션 반환 형태(`PageResponse` vs Spring `Page`), 오프셋 없는 ISO-8601 LocalDateTime(KST), 멱등성 캐시 동작, 실존 `ErrorCode` 반영 및 미구현/결정 필요 항목(`termsVersion`, 동일 멱등키 충돌 검사, 정지 계정 즉시 차단) 분리 명시.
 
-> **2026-10-18 갱신 (V2 1번, dev 병합 전)**: 브랜치 `auth/improvement/v2`의 구현 커밋 `e671c47`(로컬 커밋 완료, 미Push·미병합·미배포)에 있는 변경(DB 로그인 세션·세션 단위 로그아웃·`AUTHENTICATION_SERVICE_UNAVAILABLE` 503)을 §2-5에 따로 적었다. 병합 전까지 §2의 다른 표와 공통 사항은 dev(V1) 동작이다.
-> **2026-10-18 갱신 (V1 인증)**: PR #302(`46526a5`)로 구현된 이메일 인증번호 발급·확인, grant 기반 회원가입·비밀번호 재설정, `VERIFICATION_*` 에러 코드를 Controller·DTO·서비스·`ErrorCode` 기준으로 §2에 반영했다. V2 목표(세션·즉시 폐기·RT Rotation·요청 제한)는 구현 전이며 [인증 고도화 로드맵](../plans/auth/roadmap.md)을 따른다. 정책 설명은 [인증 정책](../decisions/authentication-policy.md)에 둔다.
+> **2026-10-18 이력**: DB 로그인 세션을 먼저 문서화했다. 당시 미병합 표기는 과거 상태이며, 현재는 PR #350으로 병합된 §2-5 계약을 따른다.
+> **2026-10-18 이력 (V1 인증)**: PR #302의 이메일 인증·grant 기반 회원가입·비밀번호 재설정을 반영했다. 이후 DB 세션·RT 회전·로그인 제한은 PR #350에서 구현됐다. 정책 설명은 [인증 정책](../decisions/authentication-policy.md)을 따른다.
 > **2026-10-16 갱신 (베스트 공간 랭킹)**: 관리자 통계 API(§14: 공간·지역 랭킹, 상태별 건수)를 구현 기준으로 확정했고, 공간 등록·수정의 `location`을 판교·강남·하남으로 제한했다. 결정 기록은 [decisions/space-ranking.md](../decisions/space-ranking.md).
 > **2026-10-16 갱신 (5단계)**: 예약 대기 API(§12), 내 알림 조회 API(§13), `WAITLIST_*` 에러 코드 5개, 새 테이블(`waitlist_entry`, `processed_event`, `notification`)을 반영했다. 슬롯이 풀리면 Outbox → Kafka → 컨슈머가 대기자에게 알림을 저장한다(알림은 힌트이며 예약은 선착순, 자리를 보장하지 않는다). 결정 기록은 [decisions/waitlist.md](../decisions/waitlist.md), [decisions/outbox-kafka.md](../decisions/outbox-kafka.md)를 본다.
 
@@ -14,15 +18,16 @@
 
 - Base URL: `/api/v1` (예: `/spaces` → 실제로는 `/api/v1/spaces`)
   - 출입(§7) API도 `/api/v1`로 통일됨(2026-09-17, 기존 `/api`).
-- 인증: Access Token(JWT, `Authorization: Bearer <token>`), Refresh Token(DB 저장, `POST /auth/refresh`, `POST /auth/logout`에서 HttpOnly 쿠키로 전달, Path=`/api/v1/auth`, maxAge=1일).
-- JWT 페이로드는 `id`, `email`, `role`, 만료 시각(`exp`)을 포함한다. 보호 API 요청 시 서명과 만료 시각을 검증하여 인증하며, **매 요청마다 회원 DB를 재조회하지 않는다**. 비즈니스 서비스(`ReservationHoldService`, `DoorAccessVerificationService` 등)에서도 회원 `ACTIVE` 여부를 별도 재조회하지 않으므로, 회원이 정지되어도 기존 Access Token은 만료 전까지 기술적으로 요청이 통과될 수 있다. 토큰 재발급(`POST /auth/refresh`) 시에만 DB 조회를 거쳐 `ACCOUNT_INACTIVE`(403)로 차단된다. (정지·로그아웃 후 기존 토큰 즉시 차단은 **V2 확정 목표이며 dev에는 미구현** — §11-3. dev 병합 전 V2 1번 변경은 AT에 `sid`를 넣고 보호 요청마다 세션과 회원 상태를 조회한다 — [2-5](#2-5-v2-1번-변경--db-로그인-세션-dev-병합-전))
-- 인증 불필요 API: 이메일 인증번호 발급·확인, 회원가입, 로그인, 비밀번호 재설정, 토큰 재발급, 로그아웃, 공간 목록/상세 조회, 슬롯 가용성 조회, 공간 이미지 공개 조회(`GET /space-images/{fileName}`), 토스페이먼츠 웹훅 수신(`POST /webhooks/tosspayments`, §5-0-3 — 이 경로의 `POST`만 연다).
+- 인증: Access Token(JWT, `Authorization: Bearer <token>`), Refresh Token(DB에 해시 저장, `POST /auth/refresh`, `POST /auth/logout`에서 HttpOnly 쿠키로 전달, Path=`/api/v1/auth`, Max-Age=남은 세션 수명). 세션 수명은 로그인 시점부터 24시간이며 재발급으로 연장하지 않는다.
+- JWT 페이로드에는 `id`, `email`, `role`, `sid`, 만료 시각(`exp`)이 포함된다. 인증 필터는 JWT 검증 뒤 `AuthSessionService`로 DB 세션의 소유자·폐기·만료와 회원 `ACTIVE` 상태를 확인한다. 조건을 충족하지 못하면 `INVALID_ACCESS_TOKEN`(401), 세션 조회 장애는 `AUTHENTICATION_SERVICE_UNAVAILABLE`(503)로 차단한다. 세부 계약은 §2-5, 비활성 회원 출입 로그는 §7을 따른다.
+- 인증 불필요 API: 이메일 인증번호 발급·확인, 회원가입, 로그인, 비밀번호 재설정, 토큰 재발급, 로그아웃, 공간 목록/상세 조회, 슬롯 가용성 조회, 일반 공개 랭킹(`GET /stats/**`, §14-2), 공간 이미지 공개 조회(`GET /space-images/{fileName}`), 토스페이먼츠 웹훅 수신(`POST /webhooks/tosspayments`, §5-0-3 — 이 경로의 `POST`만 연다).
 - 공통 응답: `{ status, code, message, data }` (`status`: SUCCESS | FAIL, 성공 시 `code`: "OK"). 단, `ApiResponse` 클래스에 `@JsonInclude(JsonInclude.Include.NON_NULL)`가 적용되어 있어 Java 상에서 `data == null`인 경우(실패 응답 또는 `ApiResponse<Void>`) 실제 HTTP JSON 직렬화 시 `"data"` 필드 자체가 생략된다.
+- 응답 예외: 204 성공 응답과 웹훅 수신 성공(200)은 본문이 없고, 공개 이미지 조회는 바이너리를 반환한다.
 - 페이지네이션 형식: 공통 래퍼 `PageResponse<T>` (`content`, `page`, `size`, `totalElements`, `totalPages`)를 사용한다. 대상: 공간 목록(`GET /spaces`), 관리자 공간 목록(`GET /admin/spaces`), 내 예약 목록(`GET /reservations`), 관리자 예약 목록(`GET /admin/reservations`), 관리자 회원 목록(`GET /admin/members`), 관리자 감사 로그(`GET /admin/audit-logs`), 문의 목록(`GET /inquiries`), 관리자 문의 목록(`GET /admin/inquiries`), 내 알림 목록(`GET /notifications`).
 - 관리자 회원별 크레딧 거래(`GET /admin/members/{memberId}/credit-transactions`), 예약(`GET /admin/members/{memberId}/reservations`), 상태 변경 이력(`GET /admin/members/{memberId}/status-history`) 조회도 공통 `PageResponse<T>`를 사용한다.
 - 시간: ISO-8601 문자열. 서버 직렬화는 타임존 오프셋 표기가 없는 `LocalDateTime` 형식(`"yyyy-MM-dd'T'HH:mm:ss"`)이며, 서버 내부 기준시계는 KST(`Asia/Seoul`, `Clock`)이다. 클라이언트는 이 문자열을 한국 표준시(KST)로 해석하는 것이 설계 목표이다. *(주의: 현재 프론트 `HoldCountdown.tsx`는 `new Date(holdExpiresAt)`로 브라우저 로컬 시간대로 직접 파싱하고 있어 비-KST 환경에서 오차 가능성이 있으며, 시간 파싱 코드 정정은 별도 프론트 코드 과제로 추적한다)*. 날짜는 `"yyyy-MM-dd"`, 시각은 `"HH:mm:ss"`. 예약 시간은 **30분의 배수**만 허용.
-- `Idempotency-Key`(UUID) 헤더:
-  - **실제로 돈이 움직이는 `POST /reservations/{id}/pay`에만 필수** (누락 시 400 `IDEMPOTENCY_KEY_REQUIRED`). `POST /reservations`(HOLD 생성)는 결제가 없으므로 대상 아님.
+- `Idempotency-Key` 헤더(클라이언트는 UUID를 생성해 사용):
+  - 예약 결제 `POST /reservations/{id}/pay`와 충전 승인 `POST /credits/charge-orders/confirm`에 필수(누락 시 400 `IDEMPOTENCY_KEY_REQUIRED`). 예약 결제는 필수 헤더 바인딩 후 서비스에서 공백을 검사하며, 충전 승인은 서비스에서 누락·공백을 검사한다. `POST /reservations`(HOLD 생성)는 대상이 아니다. 아래 캐시 설명은 예약 결제 기준이며 충전 승인은 §5-0을 따른다.
   - **캐시 동작**: **성공 응답(200 OK)만 캐시 테이블에 저장**되며, 결제 실패 시에는 트랜잭션이 롤백되어 캐시되지 않는다. 동일 키로 재요청 시 성공했던 건은 저장된 응답을 그대로 재생 반환한다.
   - **동시 경합**: 캐시 조회와 저장이 분리되어 있어 극히 좁은 시간차로 동시 진입 시 한쪽은 정상 처리되고 다른 쪽은 `409 RESERVATION_STATE_CONFLICT`를 받을 수 있다. 409를 받은 쪽이 동일 키로 재시도하면 저장된 최초 성공 응답을 돌려받는다. 크레딧 차감은 1회만 발생한다(`ReservationPaymentConcurrencyTest` 검증).
   - *(결정 필요)*: 동일 키에 다른 요청 본문이 들어왔을 때의 충돌 감지(`IDEMPOTENCY_KEY_CONFLICT`) 및 실패 응답 캐싱, TTL 만료 보관 정책은 현재 미구현 상태이다.
@@ -31,13 +36,32 @@
   - Swagger UI 진입/리다이렉트 경로(`/swagger-ui.html`) 및 HTML 리소스(`/swagger-ui/index.html`)가 구성되어 있으나, 자동화 테스트로 GET 200이 직접 확인된 대상 경로는 `/swagger-ui/index.html` 1건이다.
   - 브라우저를 통한 `Try it out` 대화형 실사용 테스트는 미검증 상태임.
 
+### 헤더 누락 및 공통 예외 응답
+
+> **공통 예외 검증 유의사항**: 필수 쿼리 파라미터 누락은 `MissingServletRequestParameterException` 대상이다. 기능 동결 기준 `GlobalExceptionHandler`에는 이 예외의 전용 처리기가 없고 마지막 `Exception` 처리기가 있어, 기존 명세의 400을 보장한다고 단정하지 않는다. `upToId`, `period`, `date` 누락은 실제 요청으로 상태 코드·본문 검증이 필요하다. 이번 문서 변경에서는 코드를 수정하거나 이 요청을 실행하지 않았다. 헤더 누락 처리와는 별개다.
+
+- 필수 `Idempotency-Key` 헤더가 빠지면 `MissingRequestHeaderException`을 처리하여 HTTP 400과 아래 공통 응답을 반환한다. 예약 결제 서비스는 호출되지 않는다. 인증이 필요한 API에서는 인증 검증을 먼저 통과해야 한다.
+
+```json
+{
+  "status": "FAIL",
+  "code": "IDEMPOTENCY_KEY_REQUIRED",
+  "message": "Idempotency-Key 헤더가 필요합니다."
+}
+```
+
+- 다른 필수 헤더 누락 및 읽거나 변환할 수 없는 요청 본문은 HTTP 400 / `VALIDATION_FAILED`로 처리한다.
+- `GlobalExceptionHandler`의 개별 처리기에 해당하지 않는 예외는 HTTP 500 / `INTERNAL_SERVER_ERROR`, 메시지 `서버 내부 오류가 발생했습니다.`로 반환한다. 내부 예외는 서버 로그에 기록하고 응답에 노출하지 않는다.
+- 실패 응답은 `status`, `code`, `message`를 사용하며 `data`가 null이면 JSON에서 생략한다. 이 변경은 오류 응답 형식의 통일이며, 결제 중복 차감 방지 로직을 새로 구현한 것은 아니다.
+
 ### HTTP 상태 코드 기준
 
 | 코드 | 의미 | 예 |
 | --- | --- | --- |
 | 200 | 조회/처리 성공 | 목록·상세, 결제 확정, 취소 성공 |
+| 202 | 처리 결과 미확정 | 충전 승인 결과 미확정 또는 처리 중(`CONFIRMING`) |
 | 201 | 생성 성공 | 예약(HOLD) 생성, 회원가입, 공간 등록, 도어 토큰 발급, 문의 등록 |
-| 204 | 본문 없음 성공 | 로그아웃, 대기 취소 |
+| 204 | 본문 없음 성공 | 로그아웃, 회원탈퇴, 대기 취소 |
 | 400 | 요청 형식 오류 | 필수 필드 누락, 형식 위반, 30분 단위 위반, 가격 단위 위반, 멱등키 누락, 이미지 형식/해상도 위반, 문의 입력값 오류, 인증번호 불일치·사용 불가(`VERIFICATION_CODE_MISMATCH`, `VERIFICATION_CHALLENGE_INVALID`), 인증 증표 사용 불가(`VERIFICATION_GRANT_INVALID`), 비밀번호 확인 불일치(`PASSWORD_CONFIRM_MISMATCH`) |
 | 401 | 인증 실패 | 토큰 없음(`AUTHENTICATION_REQUIRED`), 토큰 만료/위조(`INVALID_ACCESS_TOKEN`, `INVALID_REFRESH_TOKEN`), 로그인 자격증명 불일치(`INVALID_CREDENTIALS`), 탈퇴 계정의 로그인·재발급(`ACCOUNT_WITHDRAWN`) |
 | 403 | 인가 실패 | 역할 불충분(`ACCESS_DENIED`, `FORBIDDEN_ROLE`), 소유권 불일치(`FORBIDDEN_NOT_OWNER`), 정지 계정 로그인/재발급 거절(`ACCOUNT_INACTIVE`), 이메일 인증 최종 잠금(`VERIFICATION_ADMIN_LOCKED`) |
@@ -45,13 +69,13 @@
 | 409 | 상태 충돌 | 슬롯 중복(`RESERVATION_SLOT_CONFLICT`), 이미 취소/만료/확정된 예약에 대한 요청(`RESERVATION_STATE_CONFLICT`), `space.version` 불일치(`SPACE_VERSION_MISMATCH`), 공간 운영시간 축소 충돌(`SPACE_OPERATING_HOURS_CONFLICT`), 이메일 중복(`EMAIL_ALREADY_EXISTS`), 다른 충전 주문의 멱등키 재사용(`IDEMPOTENCY_KEY_REUSED`), 이미 신청한 대기(`WAITLIST_DUPLICATE`) |
 | 413 | 페이로드 초과 | 공간 대표 사진 파일 크기 5MB 초과(`IMAGE_SIZE_EXCEEDED`) |
 | 422 | 비즈니스 규칙 위반 | 크레딧 잔액 부족(`INSUFFICIENT_BALANCE`), 연장 불가(`RESERVATION_EXTEND_NOT_ALLOWED`), 비활성 공간(`SPACE_INACTIVE`), 관리자 정지/복구 불가(`TARGET_IS_ADMIN`), 자기 자신 크레딧 지급 불가(`SELF_GRANT_NOT_ALLOWED`), 답변 완료 문의 수정 불가(`INQUIRY_ALREADY_ANSWERED`), 대기 불필요(`WAITLIST_NOT_NEEDED`), 본인 점유와 겹침(`WAITLIST_ALREADY_HOLDING`), 대기 3건 초과(`WAITLIST_LIMIT_EXCEEDED`) |
-| 429 | 요청 제한 | 이메일 인증 임시 차단(`VERIFICATION_TEMPORARILY_BLOCKED`), 인증번호 30초 내 재요청(`VERIFICATION_RESEND_TOO_SOON`). V2 4번(로컬 커밋 `ee39f91`): 이메일별 로그인 제한(`LOGIN_RATE_LIMITED`, `Retry-After` 헤더). 그 밖의 범용 API 요청 제한은 미구현(V2 목표) |
-| 500 | 서버 오류 | 이미지 디스크 저장 실패(`IMAGE_STORAGE_ERROR`) |
-| 503 | 외부 의존 실패 | 인증 메일 발송 실패(`VERIFICATION_MAIL_FAILED`). V2 1번(dev 병합 전): 보호 요청의 세션 조회 DB 장애(`AUTHENTICATION_SERVICE_UNAVAILABLE`) — [2-5](#2-5-v2-1번-변경--db-로그인-세션-dev-병합-전) |
+| 429 | 요청 제한 | 이메일 인증 임시 차단(`VERIFICATION_TEMPORARILY_BLOCKED`), 인증번호 30초 내 재요청(`VERIFICATION_RESEND_TOO_SOON`). 현재 구현: 이메일별 로그인 제한(`LOGIN_RATE_LIMITED`, `Retry-After` 헤더). 그 밖의 범용 API 요청 제한은 미구현 |
+| 500 | 서버 오류 | 이미지 디스크 저장 실패(`IMAGE_STORAGE_ERROR`), 공통 예외 처리기의 서버 오류(`INTERNAL_SERVER_ERROR`) |
+| 503 | 외부 의존 실패 | 인증 메일 발송 실패(`VERIFICATION_MAIL_FAILED`), 보호 요청의 세션 조회 또는 로그인 제한 저장소 장애(`AUTHENTICATION_SERVICE_UNAVAILABLE`) — §2-5 참조 |
 
 ## 2. 인증 (Auth)
 
-> 기준: 현재 dev 소스(V1, PR #302 `46526a5` 이후). 정책 근거와 차단 단계의 의미는 [인증 정책](../decisions/authentication-policy.md), 코드 흐름은 [V1 구현 해설](../architecture/auth-v1-implementation.md)을 본다. 아래 "V1 한계"는 현재 동작이며, 해결 방향은 [V2 계획](../plans/auth/v2-plan.md)에 있다.
+> 기준: PR #350(`4051bb3`)의 DB 세션·RT 회전·로그인 제한이 병합된 코드. V1 설명은 과거 동작이며, 현재 계약은 아래 표와 §2-5를 따른다. 정책 배경은 [인증 정책](../decisions/authentication-policy.md), 구현 구조는 [V2 구현 해설](../architecture/auth-v2-implementation.md)을 참고한다.
 
 | API | 메서드/경로 | 인증 | 비고 |
 | --- | --- | --- | --- |
@@ -59,15 +83,16 @@
 | 인증번호 확인 | `POST /auth/verification/check` | 불필요 | 2-2 참조. 응답 200 `{ grant, expiresAt }`, `Cache-Control: no-store` |
 | 회원가입 | `POST /auth/signup` | 불필요 | 2-3 참조. SIGNUP grant 필수. 응답 201 `{ memberId, email, nickname }`. `role`은 요청으로 받지 않음, 서버가 항상 USER로 생성. 가입 트랜잭션에서 `SIGNUP_GRANT` 크레딧 지급(`app.credit.signup-grant`). 가입 후 로그인은 별도 |
 | 비밀번호 재설정 | `POST /auth/password-reset` | 불필요 | 2-4 참조. PASSWORD_RESET grant 필수. 응답 200 `ApiResponse<Void>`(`data` 생략) |
-| 로그인 | `POST /auth/login` | 불필요 | 성공 시 Access Token은 본문 `{ accessToken }`, Refresh Token은 HttpOnly 쿠키(`refreshToken`, Path=`/api/v1/auth`, maxAge=1일, `Secure`·`SameSite`는 `app.auth.cookie.*` 설정값)로 반환. 비밀번호를 먼저 검증한 뒤 상태를 확인한다. 오류: `VALIDATION_FAILED`(400), `INVALID_CREDENTIALS`(401, 회원 없음·로컬 자격 증명 없음·비밀번호 불일치), `ACCOUNT_WITHDRAWN`(401), `ACCOUNT_INACTIVE`(403) |
-| 토큰 재발급 | `POST /auth/refresh` | 불필요(refreshToken 쿠키) | RT 원문의 SHA-256 해시로 DB 행을 찾아 만료·폐기를 확인하고, 회원을 비관적 잠금으로 다시 읽어 상태를 확인한 뒤 새 Access Token만 본문으로 반환. 오류: `INVALID_REFRESH_TOKEN`(401, 쿠키 없음·미등록·만료·폐기), `ACCOUNT_WITHDRAWN`(401), `ACCOUNT_INACTIVE`(403). **V1 한계**: RT 회전 없음 — 새 RT 쿠키를 내려주지 않고, 같은 RT를 만료(발급 후 1일)까지 반복 사용할 수 있다. V2 1번 변경 후 동작은 [2-5](#2-5-v2-1번-변경--db-로그인-세션-dev-병합-전) |
-| 로그아웃 | `POST /auth/logout` | 불필요(refreshToken 쿠키) | 쿠키의 RT를 DB에서 폐기(`revoked_at`)하고 쿠키 만료(maxAge 0) 응답. 쿠키가 없거나 등록되지 않은 토큰이어도 같은 204 No Content. **V1 한계**: 이미 발급된 Access Token은 만료(5분)까지 보호 API에서 유효하다. V2 1번 변경 후 동작은 [2-5](#2-5-v2-1번-변경--db-로그인-세션-dev-병합-전) |
+| 로그인 | `POST /auth/login` | 불필요 | 본문 검증 뒤 이메일별 요청 제한을 적용하고 비밀번호·회원 상태를 검증한다. 성공 시 DB 세션 생성, AT 본문 `{ accessToken }`, RT HttpOnly 쿠키(`refreshToken`, Path=`/api/v1/auth`, Max-Age=남은 세션 수명, `Secure`·`SameSite`는 `app.auth.cookie.*`)를 반환한다. 오류: `VALIDATION_FAILED`(400), `INVALID_CREDENTIALS`(401), `ACCOUNT_WITHDRAWN`(401), `ACCOUNT_INACTIVE`(403), `LOGIN_RATE_LIMITED`(429, `Retry-After` 포함), 제한 저장소 장애 시 `AUTHENTICATION_SERVICE_UNAVAILABLE`(503) |
+| 토큰 재발급 | `POST /auth/refresh` | 불필요(refreshToken 쿠키) | RT 해시·세션·회원 상태를 검증하고 기존 RT를 소비한 뒤 새 AT 본문과 새 RT 쿠키를 반환한다. 세션 만료는 연장하지 않는다. 소비된 RT 재사용 시 해당 세션과 소속 RT를 폐기한다. 오류: `INVALID_REFRESH_TOKEN`(401), `ACCOUNT_WITHDRAWN`(401), `ACCOUNT_INACTIVE`(403). 세부 조건은 §2-5 참조 |
+| 회원탈퇴 | `POST /auth/withdraw` | 필요(USER) | 현재 비밀번호 확인 후 진행 예약이 없으면 논리적 탈퇴. 응답 204, RT 쿠키 만료. 세션·RT·출입 키 폐기 및 잔액 소멸. §2-6 참조 |
+| 로그아웃 | `POST /auth/logout` | 불필요(refreshToken 쿠키) | RT가 속한 세션과 해당 세션의 RT를 폐기하고 쿠키를 만료시킨다. 이후 해당 세션의 기존 AT는 인증되지 않는다. 다른 로그인 세션은 유지한다. 쿠키가 없거나 미등록 토큰이어도 204 No Content |
 
 공통 메모 (현재 코드 기준):
 - 위 요청 본문의 형식 오류는 `VALIDATION_FAILED`(400)이며 메시지는 필드 오류 메시지를 `, `로 이어 붙인다. 인증번호 발급·확인 DTO는 `code` 외에 사용자 메시지를 따로 지정하지 않아 Bean Validation 기본 메시지가 나간다.
-- `purpose`에 정의되지 않은 값을 보내는 등 JSON 역직렬화가 실패하면 `GlobalExceptionHandler`에 처리기가 없어 공통 `ApiResponse` 형식이 아닌 Spring 기본 오류 응답이 나간다(이번 문서화에서 실행으로 확인하지 않음).
+- `purpose`에 정의되지 않은 값을 보내는 등 JSON 역직렬화가 실패하면 `HttpMessageNotReadableException` 처리기가 HTTP 400 / `VALIDATION_FAILED`를 공통 `ApiResponse`로 반환한다.
 - `CustomAuthenticationFilter`의 Access Token 검사 생략 목록에는 signup·login·password-reset·refresh·logout만 있고 `verification/issue`·`verification/check`는 없다. 두 API는 `permitAll`이라 헤더 없이 호출하면 정상 처리되지만, 유효하지 않은 `Authorization: Bearer` 헤더를 붙이면 필터에서 `INVALID_ACCESS_TOKEN`(401)이 먼저 반환된다.
-- 이메일 인증 실패 차단(1차 5분, 2차 1시간, 3차 최종 잠금)과 30초 재발송 간격은 V1의 개별 방어이며, 로그인·refresh 등 범용 요청 제한은 없다.
+- 이메일 인증 실패 차단 및 30초 재발송 간격 외에 로그인 이메일별 요청 제한이 구현돼 있다(§2-5). 이 로그인 제한을 모든 API의 범용 요청 제한으로 해석하지 않는다.
 
 ### 2-1. 인증번호 발급 — `POST /auth/verification/issue`
 
@@ -106,25 +131,33 @@
 - **응답 200** `ApiResponse<Void>`
 - **처리 순서**: 확인값 비교 → PASSWORD_RESET grant 검증 → 회원 비관적 잠금 조회 → `local_credential` 조회 → 비밀번호 해시·`password_changed_at` 변경 → grant 소비. 한 트랜잭션이다. 회원 상태(ACTIVE 여부)는 이 API에서 검사하지 않는다.
 - **오류**: `VALIDATION_FAILED`(400), `PASSWORD_CONFIRM_MISMATCH`(400), `VERIFICATION_GRANT_INVALID`(400 — grant 문제뿐 아니라 회원 또는 로컬 자격 증명이 없을 때도 같은 코드)
-- **V1 한계**(V2 2번 커밋 `02c3557`에서 해소 — [2-5](#2-5-v2-1번-변경--db-로그인-세션-dev-병합-전)): 기존 Refresh Token과 Access Token을 폐기하지 않는다. 재설정 후 새 비밀번호로 새로 로그인하는 흐름은 동작하지만, 이전 로그인에서 받은 토큰도 각자 만료까지 쓸 수 있다.
+- 비밀번호 재설정 성공 시 `AuthSessionService.revokeAllForMember`로 해당 회원의 모든 세션과 RT를 폐기한다. 기존 AT는 이후 DB 세션 검증에서 거절된다.
 - 이 엔드포인트에는 Swagger `@Operation` 설명이 없다.
 
 ### 2-5. V2 1번 변경 — DB 로그인 세션 (dev 병합 전)
 
-> 상태: 구현·회귀 검증·코드 리뷰 완료, **로컬 커밋 완료, 미Push·미병합·미배포**(2026-10-18, 브랜치 `auth/improvement/v2`, 커밋 `e671c47`). 병합 전까지 위 2-1~2-4와 표의 V1 동작이 dev 기준이다. 구조와 근거는 [V2 구현 해설](../architecture/auth-v2-implementation.md), 진행 상태는 [V2 계획 §0](../plans/auth/v2-plan.md#0-진행-상태-2026-10-18-리뷰-기준)을 본다.
+> **현재 상태**: PR #350(`4051bb3`)으로 DB 세션·RT 회전·로그인 제한이 dev에 병합됐다. 이 절의 제목은 기존 링크 보존을 위해 유지하며, "dev 병합 전"은 최초 작성 시점이다. 아래 개별 커밋 표기는 구현 이력이며 현재 미병합이라는 뜻이 아니다.
 
 | 대상 | V2 1번 변경 후 계약 |
 | --- | --- |
 | 로그인 | 로그인마다 서버 세션을 만든다. 응답 형식은 같다. AT payload에 `sid`(세션 ID)가 추가되고, AT 만료는 `min(발급 + 5분, 세션 만료)`다. RT 쿠키의 DB 행은 그 세션에 연결되며 만료는 세션 만료(로그인 + 24시간)와 같다 |
-| 로그인 요청 제한 (4번, 로컬 커밋 `ee39f91`) | 요청 본문 검증을 통과한 로그인 요청을 이메일별로 센다. UTC 정렬 고정 15분 구간마다 성공·실패 합산 10회까지 처리하고, 11번째부터 구간 종료까지 비밀번호 확인 없이 429 `LOGIN_RATE_LIMITED`(공통 `ApiResponse`)와 `Retry-After: <남은 초>`(올림)를 반환한다. 미가입 이메일도 같다. 형식 오류(400)는 세지 않는다. 제한 저장소 장애는 503 `AUTHENTICATION_SERVICE_UNAVAILABLE`. 기존 세션·회원 상태에는 영향이 없다. **오류 계약 추가**(새 코드·헤더)이며 성공 응답 계약은 같다 |
+| 로그인 요청 제한 (4번, 구현 이력 `ee39f91`) | 요청 본문 검증을 통과한 로그인 요청을 이메일별로 센다. UTC 정렬 고정 15분 구간마다 성공·실패 합산 10회까지 처리하고, 11번째부터 구간 종료까지 비밀번호 확인 없이 429 `LOGIN_RATE_LIMITED`(공통 `ApiResponse`)와 `Retry-After: <남은 초>`(올림)를 반환한다. 미가입 이메일도 같다. 형식 오류(400)는 세지 않는다. 제한 저장소 장애는 503 `AUTHENTICATION_SERVICE_UNAVAILABLE`. 기존 세션·회원 상태에는 영향이 없다. **오류 계약 추가**(새 코드·헤더)이며 성공 응답 계약은 같다 |
 | 보호 요청 | JWT 서명·만료 검증 뒤 `sid`가 없거나 문자열이 아니면, 또는 세션이 없음·폐기·만료이거나 JWT `id`가 세션 소유 회원과 다르거나 회원이 `ACTIVE`가 아니면 `INVALID_ACCESS_TOKEN`(401). 정지·탈퇴 회원의 기존 AT도 이 경로로 401이다(`ACCOUNT_INACTIVE`가 아님). 세션 조회 중 DB 장애(트랜잭션 시작 실패 포함)는 인증 없이 `AUTHENTICATION_SERVICE_UNAVAILABLE`(503, 공통 `ApiResponse`) |
 | 토큰 재발급 | 기존 검사에 세션 미폐기·미만료 확인이 더해진다(위반 시 `INVALID_REFRESH_TOKEN` 401). 새 AT는 같은 `sid`이고 세션·RT 만료는 연장되지 않는다. 1·2번 기준 동작에서 3번 구현 커밋 `a29dfc9`의 RT 회전 동작으로 변경됐다(V2 3번 이슈) |
-| 토큰 재발급 (3번, 로컬 커밋 `a29dfc9`) | 성공할 때마다 새 AT(본문 `{ accessToken }`, 형식 동일)와 새 RT 쿠키(`Set-Cookie: refreshToken`, 기존 속성, `Max-Age` = 남은 세션 수명)를 준다. 구 RT는 한 번만 쓸 수 있다. 이미 사용한 RT를 다시 보내면 401 `INVALID_REFRESH_TOKEN`과 함께 **그 로그인 세션과 세션의 모든 RT가 폐기**된다(같은 회원의 다른 세션은 유지). 같은 RT 동시 제출은 하나만 교체되고 나머지가 재사용으로 판정되어 결국 그 세션이 폐기된다. grace 기간은 없다. 로그인 응답의 RT 쿠키 `Max-Age`도 남은 세션 수명(로그인 직후 약 86400)이다 |
+| 토큰 재발급 (3번, 구현 이력 `a29dfc9`) | 성공할 때마다 새 AT(본문 `{ accessToken }`, 형식 동일)와 새 RT 쿠키(`Set-Cookie: refreshToken`, 기존 속성, `Max-Age` = 남은 세션 수명)를 준다. 구 RT는 한 번만 쓸 수 있다. 이미 사용한 RT를 다시 보내면 401 `INVALID_REFRESH_TOKEN`과 함께 **그 로그인 세션과 세션의 모든 RT가 폐기**된다(같은 회원의 다른 세션은 유지). 같은 RT 동시 제출은 하나만 교체되고 나머지가 재사용으로 판정되어 결국 그 세션이 폐기된다. grace 기간은 없다. 로그인 응답의 RT 쿠키 `Max-Age`도 남은 세션 수명(로그인 직후 약 86400)이다 |
 | 계정 사건 (V2 2번, 커밋 `02c3557`) | 탈퇴(`POST /auth/withdraw`), 관리자 정지(`PATCH /admin/members/{id}/suspend`), 인증 최종 잠금 자동 정지(`POST /auth/verification/check`의 `VERIFICATION_ADMIN_LOCKED`), 비밀번호 재설정(`POST /auth/password-reset`)이 성공하면 그 회원의 모든 세션과 RT를 폐기한다. 이후 옛 AT는 401, 옛 RT로 refresh도 401이다. 관리자 복구(`PATCH /admin/members/{id}/restore`)는 폐기된 세션을 되살리지 않으며 새 로그인만 성공한다. 응답 형식·상태 코드는 바뀌지 않는다 |
 | 로그아웃 | 쿠키 RT가 속한 세션과 그 세션의 RT를 함께 폐기한다. 이후 그 세션의 기존 AT는 401, RT로 refresh도 401. 같은 회원의 다른 로그인 세션은 유지된다. 쿠키가 없거나 미등록이면 기존처럼 204 |
 | 전환 (V24) | 기존 RT는 마이그레이션에서 삭제되고, `sid` 없는 기존 AT는 거부되므로 배포 후 모든 사용자가 다시 로그인해야 한다 |
 
-4번 로그인 요청 제한은 로컬 커밋 `ee39f91`에 포함됐으며 미Push·미병합·미배포다(위 "로그인 요청 제한 (4번)" 행). RT 회전·재사용 탐지(3번)는 로컬 커밋 `a29dfc9`에 포함됐으며 미Push·미병합·미배포다. 위 "계정 사건" 행은 1번 커밋 이후의 2번 커밋 변경이다. 로그인·refresh 경로의 DB 장애는 503이 아니라 Spring 기본 오류 응답이다.
+로그인 요청 제한·RT 회전·계정 사건에 따른 세션 폐기는 PR #350의 구현에 포함된다. 로그인 제한 저장소와 보호 요청의 세션 조회 장애는 명시적인 503 처리 경로를 갖는다. 그 외 컨트롤러에서 전파된 미처리 예외는 공통 예외 처리기의 500 / `INTERNAL_SERVER_ERROR` 대상이다.
+
+### 2-6. 회원탈퇴 — `POST /auth/withdraw`
+
+- **요청**: 보호 API이며 USER만 가능. 바디 `{ "currentPassword": "..." }`(공백 불가).
+- **처리**: 회원 비관적 잠금 → 역할·상태 및 현재 비밀번호 검증 → `HELD`·`CONFIRMED`·`IN_USE` 예약 존재 시 거절 → 잔여 크레딧 소멸(`WITHDRAWAL_EXPIRATION`) → 회원 `WITHDRAWN`·탈퇴 시각 기록 → 전체 로그인 세션·RT와 활성 출입 키 폐기. 하나의 트랜잭션이며 예약을 자동 취소하지 않는다.
+- **응답**: 204 No Content, RT 쿠키 삭제(`Max-Age=0`). 폐기된 세션의 기존 AT는 이후 인증에서 401로 거절된다. `HELD`는 직접 취소하거나 만료 정리 후 다시 탈퇴할 수 있다.
+- **오류**: `VALIDATION_FAILED`(400), `CURRENT_PASSWORD_MISMATCH`(400), `AUTHENTICATION_REQUIRED`·`INVALID_ACCESS_TOKEN`(401), `FORBIDDEN_ROLE`(403), `WITHDRAWAL_ACTIVE_RESERVATION`(409). 비활성 회원의 보호 요청은 필터에서 먼저 차단되며, 서비스 내부의 `ACCOUNT_INACTIVE`·`ACCOUNT_WITHDRAWN` 검사와 구분한다.
+- 기능 동결 코드의 탈퇴 Swagger 설명에 남아 있는 “기존 액세스 토큰은 만료까지 유효” 문구는 현재 세션 폐기 동작과 다르다. 이번 이슈는 프로덕션 코드 변경을 제외하므로 주석 정정은 별도 과제로 남긴다. 정책 상세는 [회원탈퇴 정책](../decisions/member-withdrawal-policy.md)을 따른다.
 
 ## 3. 회원 (Member)
 
@@ -198,7 +231,7 @@
 - 응답(본문 없음):
   - **200** — `PAYMENT_STATUS_CHANGED`이고 `data.orderId`에 해당하는 `charge_order`가 있으면 `pg_webhook_event`에 `RECEIVED`로 한 행 기록한다. 같은 `transmission-id`가 다시 오면(순차·동시 모두) 기록하지 않고 200만 준다. 이미 `PAID`인 주문도 기록만 한다.
   - **200(기록 없음)** — 다른 이벤트 타입, `data.orderId` 누락·64자 초과, 없는 주문. 처리할 수 없는 알림이라 재전송을 유도하지 않는다.
-  - **400** `VALIDATION_FAILED` — `tosspayments-webhook-transmission-id` 헤더 누락, 본문 없음, JSON 객체가 아닌 본문. 이 경우에만 토스가 재전송한다(10초 안에 200이 아니면 최대 7회 재전송, 출처: [웹훅 연결하기](https://docs.tosspayments.com/guides/v2/webhook)).
+  - **400** `VALIDATION_FAILED` — `tosspayments-webhook-transmission-id` 헤더 누락, 본문 없음, JSON 객체가 아닌 본문. 외부 재전송 정책은 토스 문서를 따르며, 서버 장애·타임아웃도 재전송 원인이 될 수 있다(기존 문서에 기록된 정책: 10초 안에 200이 아니면 최대 7회 재전송, 출처: [웹훅 연결하기](https://docs.tosspayments.com/guides/v2/webhook)).
 - **처리 분리(응답과 무관):** 별도 스케줄러가 10초 간격으로 `RECEIVED` 행을 id 순서로 최대 50건 읽어 한 건씩 처리한다. 처리 결과는 HTTP 응답에 영향을 주지 않으며, 행을 `status=DONE`, `result`, `processed_at`으로 한 번만 갱신한다(재시도 없음). 근거는 [`pg-charge.md` 5단계 설계 결정](../decisions/pg-charge.md) 결정 4-1~4-4.
   | 주문 상태(처리 시점) | PG 조회 | 결과(`result`) | 주문·원장·잔액 |
   | --- | --- | --- | --- |
@@ -362,7 +395,7 @@
 
 **결제 대기(`HELD`) 예약도 취소할 수 있다.** 조건부 UPDATE `WHERE id=:id AND status='HELD'` → `CANCELLED`, 슬롯 삭제 + 상태 이력 + `SlotReleased` outbox 기록(`CANCELLED`). 크레딧이 차감되기 전이므로 환불·위약금은 0이다(`refundAmount`=0, `penaltyAmount`=0). 결제와 같은 행을 두고 경합하며 영향 행 0이면 409.
 
-예약자 본인만. 시작 1시간 전까지 100% 환불, 1시간 전~시작 전 50% 환불, 시작 이후는 취소 불가(체크아웃으로만 종료).
+아래는 `CONFIRMED` 예약의 일반 취소 정책이다. 예약자 본인만 가능하며 시작 1시간 전까지 100% 환불, 1시간 전~시작 전 50% 환불, 시작 이후는 취소 불가(체크아웃으로만 종료).
 
 1. 조건부 UPDATE: `WHERE id=:id AND status='CONFIRMED' AND :now < start_time` → `CANCELLED`(`cancelled_at`=now). 영향 행 0이면 409
 2. (같은 트랜잭션) 슬롯 삭제 + 활성 토큰 revoke + 크레딧 환급(`REFUND` 전액, 필요시 `PENALTY` 위약금을 **두 줄로 분리 기록**) + 상태 이력 저장
@@ -407,6 +440,17 @@
 
 > 현재 구현 경로(접두사 `/api/v1`): `POST /reservations/{id}/door-token`, `PATCH /reservations/{id}/access-token/revoke`, `GET /reservations/{id}/access-logs`, `POST /door-access/verify`. **4개 모두 로그인 필요**(verify도 서버가 로그인 회원이 예약자 본인인지 확인).
 
+### 인증 단계의 비활성 회원 처리
+
+- 4개 API 모두 JWT·DB 세션·회원 상태 검증을 먼저 거친다. 비활성 회원은 HTTP 401 / `INVALID_ACCESS_TOKEN`으로 차단되며 출입 서비스까지 도달하지 않는다.
+- 이 중 `POST /api/v1/door-access/verify`에 한해서 `door_access_log`에 `DENY / MEMBER_INACTIVE`를 기록한다. `MEMBER_INACTIVE`는 DB의 거절 사유이며 클라이언트 응답 코드가 아니다. 이 경우 일반 출입 검증 결과인 HTTP 200 / `result: DENY`를 반환하지 않는다.
+- 기록 조건: JWT 서명·만료 검증 통과, JWT 회원과 DB 세션 소유자 일치, DB 세션 만료 전, 회원 상태가 `ACTIVE`가 아님. 정지 시 세션도 폐기되므로 비활성 상태 조회에서는 `revokedAt`을 제한하지 않는다. 이는 세션 사용을 허용하는 것이 아니다.
+- 회원, 시도 시각, 결과 및 거절 사유를 저장한다. 요청 본문을 해석하지 않으므로 예약·공간은 null이며 JWT·출입키 원문은 저장하지 않는다. 예약 연결이 없어 예약별 출입 로그 조회에는 포함되지 않는다.
+- 별도 트랜잭션(`REQUIRES_NEW`)으로 저장하며, 저장 실패 시 서버 오류 로그를 남기고 인증 차단은 유지한다. 저장 실패에 대한 재시도·저장 보장은 제공하지 않는다.
+- 출입키 발급·일반 API 요청, JWT 검증 실패, 회원을 특정할 수 없거나 만료된 세션은 이 비활성 회원 출입 로그 대상에서 제외한다.
+
+### 인증 통과 후 출입 API
+
 - `POST /reservations/{reservationId}/door-token` (예약자 본인만): **발급에는 시간 제한이 없다** — `CONFIRMED` 또는 `IN_USE`이고 `now < end_time`이면 예약 확정 직후부터 언제든 발급 가능(발급은 입장 권한이 아니라 신분증을 받는 것일 뿐, `start` 전엔 문이 열리지 않는다). 기존 활성 토큰은 먼저 폐기 후 재발급. 응답: 201 `ApiResponse<DoorAccessTokenResponse>` (`reservationId`, `token`, `issuedAt`). 오류: `AUTHENTICATION_REQUIRED`(401), `FORBIDDEN_NOT_OWNER`(403), `RESERVATION_NOT_FOUND`(404), `RESERVATION_STATE_CONFLICT`(409, 동시 발급 경합)
 - `PATCH /reservations/{reservationId}/access-token/revoke` (예약자 본인만): 해당 예약에 발급된 활성 출입 토큰을 즉시 폐기. 응답: 200 `ApiResponse<Void>` (Java 상으로는 `data: null`이나, `@JsonInclude(NON_NULL)`로 인해 실제 HTTP JSON 직렬화 시 `"data"` 필드가 생략되어 `{ "status": "SUCCESS", "code": "OK", "message": "요청이 성공적으로 처리되었습니다." }` 형태로 반환됨). 오류: `AUTHENTICATION_REQUIRED`(401), `FORBIDDEN_NOT_OWNER`(403), `RESERVATION_NOT_FOUND`(404), `ACTIVE_ACCESS_TOKEN_NOT_FOUND`(404)
 - `GET /reservations/{reservationId}/access-logs` (예약자 본인만): 해당 예약의 출입 기록 목록 조회. 응답: 200 `ApiResponse<List<DoorAccessLogResponse>>` (`accessLogId`, `attemptedAt`, `requestedSpaceName`, `result`, `reasonCode`). 오류: `AUTHENTICATION_REQUIRED`(401), `FORBIDDEN_NOT_OWNER`(403), `RESERVATION_NOT_FOUND`(404)
@@ -418,7 +462,7 @@
      - **재입장**: `(checked_in_at, end_time)` (종료 정각은 거절)
      - 허용 시간 외 시 `OUTSIDE_ALLOWED_TIME`으로 거절
   4. 최초 체크인 성공 시 `CONFIRMED → IN_USE` 전이가 부수 효과로 발생
-  5. 성공 및 거절 모두 `door_access_log`에 기록되며, 거절 시에도 HTTP 200과 함께 `result: "DENY"`로 반환
+  5. 인증을 통과한 출입 서비스의 성공 및 거절은 `door_access_log`에 기록되며, 거절 시에도 HTTP 200과 함께 `result: "DENY"`로 반환. 인증 단계에서 차단되는 비활성 회원은 위 정책을 따른다.
   - 오류: `VALIDATION_FAILED`(400), `AUTHENTICATION_REQUIRED`(401)
 
 > **2026-09-15 정정** (`core-domain-decisions.md` §8): 기존 "발급 30분 전부터, 최초 체크인 시작 전후 30분" 규칙을 대체한다. 발급 시간 제한을 없애고, 최초 체크인은 앞 여유 0분·뒤 15분(`[start, start+15m]`)으로 확정. 15분 내 미체크인은 배치가 `NO_SHOW`로 전이시키며 슬롯은 반환되지만 환불은 없다.
@@ -468,11 +512,18 @@
 | `member.status` | `ACTIVE`, `SUSPENDED`, `WITHDRAWN` |
 | `space.status` | `ACTIVE`, `INACTIVE` |
 | `reservation.status` | `HELD`, `EXPIRED`, `CONFIRMED`, `IN_USE`, `COMPLETED`, `CANCELLED`, `NO_SHOW` |
-| `credit_transaction.type` | `SIGNUP_GRANT`, `ADMIN_GRANT`, `RESERVATION_CHARGE`, `REFUND`, `PENALTY` |
+| `credit_transaction.type` | `SIGNUP_GRANT`, `ADMIN_GRANT`, `RESERVATION_CHARGE`, `REFUND`, `PENALTY`, `WITHDRAWAL_EXPIRATION`, `TOP_UP` |
 | `door_access_log.result` | `ALLOW`, `DENY` |
-| `audit_log.action` | `REGISTER_SPACE`, `MODIFY_SPACE`, `SUSPEND_MEMBER`, `REACTIVATE_MEMBER`, `LOCK_MEMBER_BY_VERIFICATION`(이메일 인증 3차 차단에 따른 시스템 정지), `FORCE_CANCEL_RESERVATION`, `GRANT_CREDIT` |
+| `door_access_log.reason_code` | `TOKEN_NOT_FOUND`, `TOKEN_REVOKED`, `RESERVATION_NOT_ACTIVE`, `OUTSIDE_ALLOWED_TIME`, `SPACE_MISMATCH`, `MEMBER_MISMATCH`, `MEMBER_INACTIVE` (인증 단계 전용, §7) |
+| `charge_order.status` | `PENDING`, `CONFIRMING`, `PAID`, `FAILED` |
+| `pg_webhook_event.status` | `RECEIVED`, `DONE` (문자열 저장) |
+| `pg_webhook_event.result` | `CONFIRMED`, `ALREADY_PAID`, `ORDER_PENDING`, `ORDER_FAILED`, `ORDER_NOT_FOUND`, `ORDER_INVARIANT_VIOLATION`, `PG_NOT_APPROVED`, `PG_MISMATCH`, `PG_LOOKUP_ERROR`, `STATE_CONFLICT`, `COMPLETE_ERROR` |
+| 랭킹 `period` | `DAILY`, `WEEKLY`, `MONTHLY` |
+| 랭킹 `metric` | `NET_REVENUE`, `RESERVATION_COUNT`, `SLOT_COUNT` |
+| 랭킹 응답 `status` | `CONFIRMED`, `PENDING`, `UNAVAILABLE` |
+| `audit_log.action` | `REGISTER_SPACE`, `MODIFY_SPACE`, `SUSPEND_MEMBER`, `REACTIVATE_MEMBER`, `LOCK_MEMBER_BY_VERIFICATION`(이메일 인증 3차 차단에 따른 시스템 정지), `FORCE_CANCEL_RESERVATION`, `GRANT_CREDIT`, `CHARGE_AMOUNT_MISMATCH`, `CHARGE_RECOVERY_MANUAL_REVIEW` |
 | `verification_guard.purpose` (요청 `purpose`) | `SIGNUP`, `PASSWORD_RESET` |
-| `audit_log.target_type` | `SPACE`, `MEMBER`, `RESERVATION` |
+| `audit_log.target_type` | `SPACE`, `MEMBER`, `RESERVATION`, `CHARGE_ORDER` |
 | `inquiry.status` | `WAITING`, `ANSWERED` |
 | `waitlist_entry.status` | `WAITING`, `CANCELLED`, `EXPIRED` (`EXPIRED` 전이는 미구현 — 구간이 지난 `WAITING` 행은 "활성" 기준(시작 시각이 미래)에서 빠질 뿐 상태는 그대로다) |
 | `outbox_event.status` | `PENDING`, `PUBLISHED` |
@@ -490,10 +541,10 @@
 2. **멱등성 키 충돌 감지 및 실패 응답 캐싱/TTL 정책**
    - **현재 구현**: `POST /reservations/{id}/pay`에서 성공 응답(200 OK)만 `idempotency_key` 테이블에 저장되며, 실패 시에는 롤백되어 캐시되지 않는다. 또한 동일 키에 대해 다른 요청 본문이 전달되어도 충돌을 감지하는 로직(`IDEMPOTENCY_KEY_CONFLICT`)이 없다.
    - **결정 과제**: 동일 키에 다른 페이로드가 전달되었을 때 409 충돌을 발생시킬 것인지(요청 바디 해시 저장 필요), 실패 응답도 캐시하여 무조건 동일 결과를 재현할 것인지, 만료 기간(TTL) 및 테이블 정리 스케줄러를 도입할 것인지 결정 필요.
-3. **정지·로그아웃·비밀번호 재설정·탈퇴 후 기존 인증 수단 즉시 차단 (V2 확정 목표, dev에는 미구현)**
-   - **현재 구현**: `CustomAuthenticationFilter`는 JWT 서명과 만료 시각만 검증하며 회원 DB를 재조회하지 않는다. 비즈니스 서비스(`ReservationHoldService`, `DoorAccessVerificationService` 등)에서도 회원 `status == ACTIVE` 여부를 별도 확인하지 않는다. 따라서 회원이 정지되어도 기존 Access Token 만료 전까지는 예약 생성 및 도어 출입 시도가 기술적으로 통과된다(토큰 재발급 요청 시에만 `ACCOUNT_INACTIVE` 403 차단).
+3. **정지·로그아웃·비밀번호 재설정·탈퇴 후 기존 인증 수단 즉시 차단 (구현 반영)**
+   - **현재 구현**: PR #350 이후 `CustomAuthenticationFilter`는 JWT 검증 뒤 DB 세션과 회원 상태를 검증한다. 세션 폐기·만료 또는 비활성 회원의 기존 Access Token은 `INVALID_ACCESS_TOKEN`(401)으로 차단된다. 비활성 회원 출입 시도 로그의 추가 조건과 저장 범위는 §7을 따른다.
    - **목표**: 차단 여부는 더 이상 결정 대상이 아니다. [인증 정책](../decisions/authentication-policy.md) §10에 따라 V2에서 Redis 없이 DB 기반 로그인 세션으로 기존 AT·RT를 폐기한다. 세션 식별자·RT 재사용 시 폐기 범위·역할 변경 반영 방식 등 세부는 [V2 계획](../plans/auth/v2-plan.md) §3 결정표에서 정한다. 대상 시나리오는 `V2SecurityRedTest` 11개이며 [인증 보안 테스트](../testing/auth-security-tests.md)를 본다.
-   - **진행(dev 병합 전)**: V2 1번 변경으로 로그아웃한 세션의 기존 AT·RT 차단과 정지·탈퇴 회원의 기존 AT 거부(회원 상태 조회)가 구현됐다([2-5](#2-5-v2-1번-변경--db-로그인-세션-dev-병합-전)). 비밀번호 재설정·정지·탈퇴·인증 최종 잠금 시 회원 전체 세션 폐기와 복구 후 폐기 유지는 2번 커밋(`02c3557`)으로 구현됐다. RT 회전(3번)은 로컬 커밋(`a29dfc9`), 요청 제한은 남아 있다.
+   - **이력 주의**: §2-5 및 문서 상단의 병합 전 설명은 당시 진행 기록이다. 현재 동작은 위 구현 설명을 기준으로 하며, 전체 인증 고도화 문서의 이력 정리는 별도 범위다.
 4. **관리자 예약 목록 검색 조건 필터 지원 (해결 완료)**
    - **구현 현황**: `AdminReservationSearchCondition`(`date`, `spaceId`, `status`) 파라미터 바인딩 및 `ReservationRepository.searchReservations` 동적 JPQL 필터링 구현 완료. `PageResponse<AdminReservationResponse>` 규격 정합화 완료.
 5. **노쇼 환불률**: 현재 확정값은 0%이며 강사 피드백에 따라 재검토 중(`docs/decisions/core-domain-decisions.md` §13). 변경 시 명세서와 크레딧 환급 로직 동기화 필요.
@@ -526,7 +577,7 @@
 
 - `GET /notifications` (인증 필요): 내 알림 목록, 최신순(id 내림차순). `page`, `size`(기본 20). 응답 200 `ApiResponse<PageResponse<NotificationResponse>>`. 오류: `AUTHENTICATION_REQUIRED`(401). 본인 알림만 조회된다.
 - `GET /notifications/unread-count` (인증 필요): 안 읽은 알림 개수. 응답 200 `ApiResponse<{ unreadCount }>`. 오류: `AUTHENTICATION_REQUIRED`(401)
-- `POST /notifications/read-all` (인증 필요): 필수 쿼리 `upToId`(Long, 렌더링된 목록의 최대 알림 id)를 받는다. 토큰 회원의 `read_at IS NULL`이며 `id <= upToId`인 알림만 한 번의 UPDATE로 현재 시각으로 갱신한다. 요청 본문 없음. 응답 200 `ApiResponse<{ updatedCount }>`. 재요청 시 이미 읽은 시각을 유지하고 변경 건수 0을 반환한다. 오류: `AUTHENTICATION_REQUIRED`(401). 상한보다 큰 id의 알림은 미변경이며 상한 이하의 이전 페이지 알림은 포함한다. 프런트는 빈 목록이면 호출하지 않는다. 예: `POST /api/v1/notifications/read-all?upToId=123`. 상한 누락·Long 변환 불가는 400이다.
+- `POST /notifications/read-all` (인증 필요): 필수 쿼리 `upToId`(Long, 렌더링된 목록의 최대 알림 id)를 받는다. 토큰 회원의 `read_at IS NULL`이며 `id <= upToId`인 알림만 한 번의 UPDATE로 현재 시각으로 갱신한다. 요청 본문 없음. 응답 200 `ApiResponse<{ updatedCount }>`. 재요청 시 이미 읽은 시각을 유지하고 변경 건수 0을 반환한다. 오류: `AUTHENTICATION_REQUIRED`(401). 상한보다 큰 id의 알림은 미변경이며 상한 이하의 이전 페이지 알림은 포함한다. 프런트는 빈 목록이면 호출하지 않는다. 예: `POST /api/v1/notifications/read-all?upToId=123`. Long 변환 불가는 400이다. 상한 누락은 공통 예외 검증 유의사항을 참조한다.
 
 ### 응답 필드 (`NotificationResponse`)
 
@@ -538,7 +589,7 @@
 
 - `GET /admin/stats/space-ranking?period=&date=&metric=&location=&limit=`: 공간별 베스트 랭킹.
   - `period`: `DAILY` | `WEEKLY` | `MONTHLY` (필수). `date`: `yyyy-MM-dd`, 그 날짜를 포함하는 달력 기간(KST, 주는 월요일 시작)을 조회한다(필수). `metric`: `NET_REVENUE` | `RESERVATION_COUNT` | `SLOT_COUNT` (정렬 기준, 기본 `NET_REVENUE`). `location`: `판교` | `강남` | `하남` 필터(선택). `limit`: 기본 10, 최대 50(1 미만·50 초과는 400).
-  - **끝난 기간**만 순위를 내려준다. 오늘·이번 주·이번 달을 포함하는 `date`는 `status = PENDING`과 `confirmAt`을 내려주고 `items`는 비어 있다. 현재 기간보다 미래인 `date`는 400 `VALIDATION_FAILED`다. 기간이 막 끝난 직후(기간 끝 날짜 00:00~00:01)에 확정 행이 아직 없으면 빈 `CONFIRMED`가 아니라 `PENDING`이다. 끝났지만 스냅샷이 없는 기간은 `status = UNAVAILABLE`이다. 판정은 별도 표식 없이 근사한다: 행이 없는 끝난 기간이 그 `period`의 가장 이른 확정 기간보다 앞서거나, 그 `period`의 확정 기록이 전혀 없으면 `UNAVAILABLE`, 확정 기록 범위 안이면 거래가 없던 기간으로 보고 `CONFIRMED`에 `items`가 빈 배열이고 `computedAt`이 `null`이다. 오늘이 속한 기간 안의 날짜는 미래 날짜여도 `PENDING`이다. 필수 파라미터(`period`, `date`) 누락, 없는 `period`·`metric` 값, 날짜 형식 오류, 지원하지 않는 `location`도 400 `VALIDATION_FAILED`다.
+  - **끝난 기간**만 순위를 내려준다. 오늘·이번 주·이번 달을 포함하는 `date`는 `status = PENDING`과 `confirmAt`을 내려주고 `items`는 비어 있다. 현재 기간보다 미래인 `date`는 400 `VALIDATION_FAILED`다. 기간이 막 끝난 직후(기간 끝 날짜 00:00~00:01)에 확정 행이 아직 없으면 빈 `CONFIRMED`가 아니라 `PENDING`이다. 끝났지만 스냅샷이 없는 기간은 `status = UNAVAILABLE`이다. 판정은 별도 표식 없이 근사한다: 행이 없는 끝난 기간이 그 `period`의 가장 이른 확정 기간보다 앞서거나, 그 `period`의 확정 기록이 전혀 없으면 `UNAVAILABLE`, 확정 기록 범위 안이면 거래가 없던 기간으로 보고 `CONFIRMED`에 `items`가 빈 배열이고 `computedAt`이 `null`이다. 오늘이 속한 기간 안의 날짜는 미래 날짜여도 `PENDING`이다. 필수 파라미터(`period`, `date`) 누락은 공통 예외 검증 유의사항을 참조한다. 없는 `period`·`metric` 값, 날짜 형식 오류, 지원하지 않는 `location`도 400 `VALIDATION_FAILED`다.
   - 응답: `{ period, periodStart, periodEnd, metric, status, confirmAt, computedAt, items[] }`. `periodStart`는 포함, `periodEnd`는 제외(다음 기간 시작)다. `computedAt`은 확정 계산 완료 시각, `confirmAt`은 `PENDING`일 때만 값을 갖는 확정 기준 시각(해당 기간 다음 날 00:00)이다.
   - `items[]` 원소: `{ rank, previousRank, spaceId, spaceName, location, spaceStatus, netRevenue, reservationCount, slotCount }`. `previousRank`는 같은 `period`·`metric`·`location` 필터의 직전 기간 **전체** 순위(`limit`을 적용하지 않은 순위)이며, 직전 기간에 행이 없으면 `null`이다. `rank`는 필터를 적용한 목록 안의 순번이다. 세 지표는 항상 모두 내려가고 `metric`은 정렬만 정한다.
 - `GET /admin/stats/location-ranking?period=&date=&metric=&limit=`: 지역별 베스트 랭킹. 공간 행을 스냅샷에 저장된 `location`으로 합산한다. 파라미터와 상태 규칙은 위와 같다. `items[]` 원소: `{ rank, previousRank, location, spaceCount, netRevenue, reservationCount, slotCount }`.
@@ -562,4 +613,3 @@
   - `metric`은 `RESERVATION_COUNT`(기본) 또는 `SLOT_COUNT`만 허용한다. `NET_REVENUE`는 정렬 순서로 매출 순위가 드러나므로 400 `VALIDATION_FAILED`다.
   - `items[]`에서 `netRevenue`가 빠진다. 공간: `{ rank, previousRank, spaceId, spaceName, location, spaceStatus, reservationCount, slotCount }`, 지역: `{ rank, previousRank, location, spaceCount, reservationCount, slotCount }`.
 - 관리자 랭킹(`/admin/stats/*`)은 그대로 ADMIN 전용이며 순매출을 포함한다.
-
