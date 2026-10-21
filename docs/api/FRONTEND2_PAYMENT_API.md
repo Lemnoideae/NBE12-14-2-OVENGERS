@@ -118,15 +118,16 @@ Content-Type: application/json
 | --- | --- | --- |
 | 400 | `IDEMPOTENCY_KEY_REQUIRED` | `Idempotency-Key` 헤더 누락 시 발생 |
 | 400 | `VALIDATION_FAILED` | `spaceVersion` 누락 또는 잘못된 요청 형식 |
-| 401 | `AUTHENTICATION_REQUIRED` | Access Token 누락 또는 만료 (로그인 페이지 이동 또는 토큰 갱신) |
+| 401 | `AUTHENTICATION_REQUIRED` | Access Token 누락 |
+| 401 | `INVALID_ACCESS_TOKEN` | 토큰 만료·무효, 세션 폐기 또는 비활성 회원 |
 | 403 | `FORBIDDEN_NOT_OWNER` | 예약 소유자가 아닌 회원의 결제 시도 |
 | 404 | `RESERVATION_NOT_FOUND` | 유효하지 않은 `reservationId` |
 | 404 | `SPACE_NOT_FOUND` | 연계된 공간을 찾을 수 없음 |
 | 409 | `RESERVATION_STATE_CONFLICT` | **HOLD 만료** 또는 이미 확정/취소된 예약.<br>• *현재 UI*: 공통 `<ErrorMessage>`로 서버 오류 문구 표시. (타이머 로컬 만료 시 "결제 대기 시간이 끝났습니다. 새로 예약해 주세요." 배너 및 결제 버튼 비활성화)<br>• *(권장 UX / 추후 과제)*: 만료 전용 다이얼로그 모달 노출 후 새 예약 페이지로 유도 |
 | 409 | `SPACE_VERSION_MISMATCH` | 결제 대기 중 공간 정보(가격 등)가 변경됨.<br>• *현재 UI*: 공통 `<ErrorMessage>`로 노출.<br>• *(권장 UX / 추후 과제)*: 공간 정보 변경 안내 모달 후 공간 상세 재조회 이동 |
-| 422 | `INSUFFICIENT_BALANCE` | 크레딧 잔액 부족.<br>• *현재 UI*: 화면 진입 시 잔액 부족이면 "크레딧 잔액이 부족합니다." 배너 표시 및 결제 버튼 비활성화, 실패 시 공통 `<ErrorMessage>` 노출.<br>• *(권장 UX / 추후 과제)*: 크레딧 충전 페이지 이동 안내 다이얼로그 (현재 프론트에 충전 경로 없음) |
+| 422 | `INSUFFICIENT_BALANCE` | 잔액 부족 응답 시 `InsufficientCreditDialog`를 열어 충전 경로를 안내한다. `chargeAmount`와 결제 화면 복귀용 `returnTo`를 전달한다. |
 
-> 💡 **주의**: 백엔드 `ErrorCode`에는 `UNAUTHORIZED`, `RESERVATION_ACCESS_DENIED`, `RESERVATION_HOLD_EXPIRED`라는 코드가 존재하지 않는다. 인증 실패는 `AUTHENTICATION_REQUIRED`(401), 소유권 불일치는 `FORBIDDEN_NOT_OWNER`(403), HOLD 만료는 `RESERVATION_STATE_CONFLICT`(409)로 응답되므로 프론트엔드 에러 핸들러는 이 실제 코드를 기준으로 분기해야 한다.
+> 💡 **주의**: 백엔드 `ErrorCode`에는 `UNAUTHORIZED`, `RESERVATION_ACCESS_DENIED`, `RESERVATION_HOLD_EXPIRED`라는 코드가 존재하지 않는다. 인증 정보 누락은 `AUTHENTICATION_REQUIRED`(401), 만료·무효 토큰은 `INVALID_ACCESS_TOKEN`(401), 소유권 불일치는 `FORBIDDEN_NOT_OWNER`(403), HOLD 만료는 `RESERVATION_STATE_CONFLICT`(409)로 응답되므로 프론트엔드 에러 핸들러는 이 실제 코드를 기준으로 분기해야 한다.
 
 ## 체크아웃
 

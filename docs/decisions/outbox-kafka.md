@@ -1,5 +1,9 @@
 # Outbox + Kafka — 이벤트 전달
 
+> **구현 기준: 기능 동결 커밋 `d1a15ec` / 문서 갱신일: 2026-10-21**. 기존 단계별 계획·실행 수치는 당시 기록으로 보존한다. 이번 확인은 코드·설정 대조이며 운영 PG·Kafka 재검증을 뜻하지 않는다.
+
+> **과거 보고서 참조 안내**: 이 문서에서 언급하는 `docs/lab/notes/`의 보고서 원문은 기능 동결 커밋 `d1a15ec`에 포함되어 있지 않다. 보고서 이름과 당시 결과는 기존 문서의 기록으로 보존하며, 이번 갱신에서 원문을 확인하거나 테스트를 재실행했다는 뜻이 아니다. 해당 보고서 이름에는 링크를 제공하지 않는다.
+
 > 상태: 10/21 범위 구현·문서화 완료 (2~5단계). 작성: 2026-10-06. 열린 질문 결정 반영: 2026-10-06. 10/21 범위 결정 반영: 2026-10-15. relay(3단계)·컨슈머(4단계)·최종 정리(5단계) 반영: 2026-10-16. 운영 서버 Kafka 적용 반영: 2026-10-18.
 
 ## 한 줄 요약
@@ -118,7 +122,7 @@
 | 얻는 것 | 잃는 것(비용·위험) | 완화책 |
 | --- | --- | --- |
 | 변경과 이벤트 기록이 원자적이다(롤백되면 이벤트도 없음) | 취소 트랜잭션에 INSERT가 하나 더 붙는다. `expireHold`는 호출자 트랜잭션의 마지막 쓰기가 아니다 | FK 없는 독립 테이블이라 새 잠금 경로가 없다. 위험이 확인되면 호출자 끝에서 일괄 기록하는 대안이 step-2-review.md에 있다 |
-| 전달이 최소 1회라 유실이 없다 | 중복 전달이 정상 범위다 | 컨슈머 멱등(`processed_event` + `UNIQUE(event_id, waitlist_entry_id)` 이중 방어) |
+| 커밋된 Outbox를 재시도하여 일시적 발행 실패를 복구한다(최소 1회 전달 지향) | 중복 전달이 정상 범위다 | 컨슈머 멱등(`processed_event` + `UNIQUE(event_id, waitlist_entry_id)` 이중 방어) |
 | relay가 잠금 없이 폴링해 취소 경로와 락 대기가 없다 | 인스턴스 2개 이상이면 같은 행을 둘이 발행한다. 1초 폴링 지연이 있다 | 인스턴스 1개 가정을 명시하고, 다중화하면 분산 락이나 CDC로 바꾼다 |
 | 계속 실패하는 행도 복구 시 이어서 발행된다 | 영구 실패 행이 `batch-size`건 이상 쌓이면 뒤의 새 이벤트가 막힌다(head-of-line) | 현재 payload가 4필드 고정이라 가능성은 낮다. `attempts` 임계 관측 시 FAILED/DLT·백오프를 도입한다 |
 | Kafka를 끄면 EC2가 브로커 없이도 기동한다 | 꺼진 환경에서는 알림이 생성되지 않는다 | 기본 꺼짐(`slotkey.kafka.enabled=false`), 켜는 환경은 로컬 compose와 운영 서버(2026-10-17부터 환경변수로 켬) |
@@ -139,17 +143,17 @@
 
 #### 2단계 Outbox 기록 (2026-10-15)
 
-- `OutboxRecordIntegrationTest`: 취소·강제 취소·홀드 만료 3지점 모두 성공하면 PENDING 정확히 1건, 트랜잭션이 롤백되면 outbox 행이 없다. `Propagation.MANDATORY`라 트랜잭션 밖 호출은 `IllegalTransactionStateException`이다. 구현 전 6건 실패(`outbox_event` 테이블 없음)를 확인한 뒤 구현했다. 전체 705 tests(2단계) → fix-1 뒤 710 tests, 실패 0. 보고: [step-2.md](../lab/notes/waitlist-outbox/step-2.md), [step-2-review.md](../lab/notes/waitlist-outbox/step-2-review.md).
+- `OutboxRecordIntegrationTest`: 취소·강제 취소·홀드 만료 3지점 모두 성공하면 PENDING 정확히 1건, 트랜잭션이 롤백되면 outbox 행이 없다. `Propagation.MANDATORY`라 트랜잭션 밖 호출은 `IllegalTransactionStateException`이다. 구현 전 6건 실패(`outbox_event` 테이블 없음)를 확인한 뒤 구현했다. 전체 705 tests(2단계) → fix-1 뒤 710 tests, 실패 0. 보고: step-2.md, step-2-review.md.
 
 #### 3단계 relay와 Kafka 발행 (2026-10-15)
 
-- 전체 768 tests(3단계 리뷰 반영 후), 실패 0, 건너뜀 11. relay 실패 분기·`InterruptedException`·PUBLISHED 제외 등 5개 테스트는 구현을 일부러 망가뜨리는 변이 5종에서 모두 실패함을 확인했다([step-3-review-r2.md](../lab/notes/waitlist-outbox/step-3-review-r2.md)). 기본 설정에서 relay·Kafka 빈이 없음을 `OutboxRelayDisabledTest`, 타임아웃 불변식(`send-timeout` > `delivery.timeout` > `request.timeout`)을 `KafkaTimeoutDefaultsTest`가 고정한다.
-- 수동 E2E(로컬 Docker, `apache/kafka:3.8.0` KRaft 단일 노드, 프로필 `kafka`): 취소 후 토픽에 메시지 도착(key = `spaceId`), Kafka를 끈 채 취소해도 취소는 성공하고 outbox는 `PENDING`으로 남아 `attempts`가 5까지 오른 뒤 Kafka 재시작 약 40초 안에 `PUBLISHED`. 기록: [step-3-kafka-manual.md](../lab/notes/waitlist-outbox/step-3-kafka-manual.md).
+- 전체 768 tests(3단계 리뷰 반영 후), 실패 0, 건너뜀 11. relay 실패 분기·`InterruptedException`·PUBLISHED 제외 등 5개 테스트는 구현을 일부러 망가뜨리는 변이 5종에서 모두 실패함을 확인했다(step-3-review-r2.md). 기본 설정에서 relay·Kafka 빈이 없음을 `OutboxRelayDisabledTest`, 타임아웃 불변식(`send-timeout` > `delivery.timeout` > `request.timeout`)을 `KafkaTimeoutDefaultsTest`가 고정한다.
+- 수동 E2E(로컬 Docker, `apache/kafka:3.8.0` KRaft 단일 노드, 프로필 `kafka`): 취소 후 토픽에 메시지 도착(key = `spaceId`), Kafka를 끈 채 취소해도 취소는 성공하고 outbox는 `PENDING`으로 남아 `attempts`가 5까지 오른 뒤 Kafka 재시작 약 40초 안에 `PUBLISHED`. 기록: step-3-kafka-manual.md.
 
 #### 4단계 컨슈머 (2026-10-16)
 
-- 전체 `./gradlew cleanTest test` → **814 tests, 실패 0, 오류 0, 건너뜀 11**(11건은 모두 기존 `V2SecurityRedTest`의 `@Disabled`). 알림 관련 테스트의 분류와 내용은 위 "컨슈머 결정"의 "컨슈머 테스트" 항목에 있다. 보고: [step-4.md](../lab/notes/waitlist-outbox/step-4.md), [step-4-review.md](../lab/notes/waitlist-outbox/step-4-review.md).
-- **로컬 E2E (실제 Kafka + 컨슈머 켬)** — 기록: [step-5.md](../lab/notes/waitlist-outbox/step-5.md).
+- 전체 `./gradlew cleanTest test` → **814 tests, 실패 0, 오류 0, 건너뜀 11**(11건은 모두 기존 `V2SecurityRedTest`의 `@Disabled`). 알림 관련 테스트의 분류와 내용은 위 "컨슈머 결정"의 "컨슈머 테스트" 항목에 있다. 보고: step-4.md, step-4-review.md.
+- **로컬 E2E (실제 Kafka + 컨슈머 켬)** — 기록: step-5.md.
 
   | 확인 | 결과 |
   | --- | --- |
@@ -175,7 +179,7 @@
 
 ### 열린 질문
 
-- (해소, 2026-10-16) 재알림 쓰로틀·읽음 처리·SSE는 3차로 미룬다.
+- (2026-10-16 당시 결정) 재알림 쓰로틀·읽음 처리·SSE를 3차로 분류했다. 이후 상한 기반 일괄 읽음과 목록 UI는 구현됐으며 [알림 UI 결정](notification-ui.md)을 따른다. 쓰로틀·SSE는 후속 범위다.
 - (열림) 건너뛴 이벤트의 복구 수단(DLT)과 영구 실패 행의 head-of-line 문제는 3차에서 함께 설계한다.
 
 ## 면접·발표용 정리 (구현 후)

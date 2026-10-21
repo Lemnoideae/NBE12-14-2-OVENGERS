@@ -1,5 +1,7 @@
 # 관리자 공간 대표 사진: 등록·교체와 조회
 
+> **과거 보고서 참조 안내**: 이 문서에서 언급하는 `.agents/03_CODING_RESULTS/old/`의 보고서 원문은 기능 동결 커밋 `d1a15ec`에 포함되어 있지 않다. 보고서 이름과 당시 결과는 기존 문서의 기록으로 보존하며, 이번 갱신에서 원문을 확인하거나 테스트를 재실행했다는 뜻이 아니다. 해당 보고서 이름에는 링크를 제공하지 않는다.
+
 이 문서는 **현재 구현된 단일 대표 사진**의 사용 방법과 프론트엔드 → Spring MVC → 파일·DB 저장 흐름을 설명한다. 지원 형식은 현재 코드 기준 JPEG/PNG이며 WebP는 지원하지 않는다.
 
 ## 한눈에 보기
@@ -69,8 +71,8 @@ Swagger UI(`/swagger-ui/index.html`, 또는 리다이렉트 경로 `/swagger-ui.
 
 ## 검증 범위 및 미검증 사항
 
-- **확인된 검증**: 등록·수정 화면의 기본 업로드는 각각 POST/PATCH → PUT 200, 새 `imagePath`의 이미지 GET 200과 화면 표시까지 로컬 스모크([2026-09-23 14:51 스모크 결과 보고서](../../.agents/03_CODING_RESULTS/old/260923_1451_admin_space_image_upload_smoke_acceptance_result.md))에서 확인했다. 백엔드 자동 검증은 [저장 계층 테스트](../../backend/src/test/java/com/ovengers/slotkey/space/image/SpaceImageStorageTest.java), [이미지 서비스 통합 테스트](../../backend/src/test/java/com/ovengers/slotkey/space/service/AdminSpaceImageServiceIntegrationTest.java), [조회 컨트롤러 테스트](../../backend/src/test/java/com/ovengers/slotkey/space/controller/SpaceImageControllerTest.java), 및 OpenAPI 문서화 자동 검증([2026-09-23 20:48 Swagger 문서화 결과 보고서](../../.agents/03_CODING_RESULTS/old/260923_2048_space_image_swagger_documentation_result.md))에서 확인할 수 있다. 로컬 스모크 실행 당시의 정적 curl 및 브라우저 확인 기록은 프로젝트 산출물에 보존되어 있다.
+- **기존 검증 기록**: 등록·수정 화면의 기본 업로드는 각각 POST/PATCH → PUT 200, 새 `imagePath`의 이미지 GET 200과 화면 표시까지 로컬 스모크(2026-09-23 14:51 스모크 결과 보고서)에서 확인한 것으로 기록되어 있다. 관련 백엔드 자동 테스트는 [저장 계층 테스트](../../backend/src/test/java/com/ovengers/slotkey/space/image/SpaceImageStorageTest.java), [이미지 서비스 통합 테스트](../../backend/src/test/java/com/ovengers/slotkey/space/service/AdminSpaceImageServiceIntegrationTest.java), [조회 컨트롤러 테스트](../../backend/src/test/java/com/ovengers/slotkey/space/controller/SpaceImageControllerTest.java)이다. OpenAPI 문서화 자동 검증의 당시 참조는 2026-09-23 20:48 Swagger 문서화 결과 보고서였다.
 - **미검증 사항**:
   - 실제 브라우저 환경에서 Swagger UI `Try it out` 인터페이스를 통한 multipart 바이너리 파일 업로드 실사용은 아직 미검증 상태다.
-  - AWS S3, EBS 영속 볼륨, CloudFront CDN 등 클라우드 프로덕션 운영 스토리지 환경에서의 파일 저장·동기화는 실제 인프라 미배포 상태로 미검증이다.
+  - 운영 환경에서 이미지 파일의 저장·영속성·조회 경로가 정상 동작하는지는 이번 문서 갱신에서 검증하지 않았다. 이는 전체 인프라가 미배포 상태라는 뜻이 아니며, 프론트 정적 파일의 S3·CloudFront 배포와 업로드 이미지의 저장 방식을 동일하게 간주하지 않는다.
   - 네트워크 단절이나 강제 프로세스 종료 등 극단적인 장애 시의 파일/DB 잔여물 정리 등 일부 세부 경계 조합은 추가 실측이 필요하다.

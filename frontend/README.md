@@ -53,7 +53,7 @@ NEXT_PUBLIC_TOSS_PAYMENTS_CLIENT_KEY=로컬에서_사용할_테스트_클라이�
 
 - **정적 빌드**: S3 호스팅을 위해 `STATIC_EXPORT=true npm run build`를 실행하면 Next.js가 정적 파일(`out/`)을 생성합니다 (`output: 'export'`).
 - **라우팅 구성**: 정적 export 모드에서는 `next.config.ts`의 Next rewrites를 사용할 수 없으므로, 배포 환경에서는 CloudFront 캐시 동작에서 `/api/*` 경로를 백엔드 EC2 인스턴스로 전달하도록 설정합니다.
-- **배포 실측 상태**: 본 AWS 배포 구성은 아키텍처 설계 결정 사항이며, 실제 운영 클라우드 인프라 배포 및 E2E 실측은 아직 미실시 상태입니다.
+- **배포 설정과 검증 범위**: 기능 동결 커밋 `d1a15ec`에는 S3 업로드·CloudFront 캐시 무효화 워크플로가 구현되어 있습니다. [배포 문서](../docs/operations/deploy-cicd.md)의 과거 실행 기록과 현재 운영 상태는 구분합니다. 이번 문서 갱신에서 운영 배포 상태나 전체 사용자 흐름을 새로 검증하지 않았습니다.
 
 ## 구조
 
@@ -61,12 +61,12 @@ NEXT_PUBLIC_TOSS_PAYMENTS_CLIENT_KEY=로컬에서_사용할_테스트_클라이�
 src
 ├── types/api.ts         서버 응답·요청 타입. 서버 DTO 가 바뀌면 여기부터 고칩니다
 ├── app                  App Router 라우트. page/layout 은 얇게 두고 metadata 만 선언
-│   ├── layout.jsx       <html>/<body>, 공통 metadata, Providers
+│   ├── layout.tsx       <html>/<body>, 공통 metadata, Providers
 │   ├── icon.svg         파비콘 (apple-icon.png 과 같은 브랜드 마크)
 │   ├── (user)           사용자 화면 그룹 — UserShell(헤더·푸터)
 │   └── admin            관리자 화면 — RequireAdmin + AdminShell
 ├── views                실제 화면 컴포넌트('use client'). app 의 page 가 얇게 감쌉니다
-├── api                  client.js(fetch 래퍼) + 도메인별 호출 함수
+├── api                  client.ts(fetch 래퍼) + 도메인별 호출 함수
 ├── context / hooks      AuthContext, useAuth, useApi, useSlotSelection, useIdempotencyKey
 ├── components           auth(접근 제어) · layout · brand · common · space · reservation · access · member
 ├── constants            apiRoutes, routePaths, errorCodes, enums
@@ -82,8 +82,7 @@ src
   `src/types/api.ts` 에 모양을 추가하는 쪽으로 해결합니다.
 - **화면의 접근 제어는 편의입니다.** `RequireAuth`·`RequireAdmin` 이 메뉴와 화면을 가리지만,
   실제 권한 판단은 서버가 합니다. 화면에서 버튼을 숨겼다는 이유로 서버 검사를 생략하지 않습니다.
-- **인증은 클라이언트에서만 이루어집니다.** 토큰을 `localStorage` 에 두므로 화면은 모두
-  클라이언트 컴포넌트이고, 서버 컴포넌트에서 사용자별 데이터를 미리 가져오지 않습니다.
+- **화면의 로그인 상태는 클라이언트에서 관리합니다.** `AuthProvider`가 토큰과 로그인 상태를 관리하지만, 실제 API 인증은 백엔드가 JWT와 DB 세션·회원 상태를 검증하여 결정합니다. 화면의 접근 제어는 서버 인증·인가를 대체하지 않습니다.
 - **App Router 에는 라우트 state 가 없습니다.** react-router 의 `navigate(..., { state })` 로
   넘기던 값은 쿼리스트링으로 바꿨습니다. 로그인 복귀 경로는 `?redirect=`,
   결제 화면의 공간 버전은 `?spaceVersion=` 입니다.

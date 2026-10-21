@@ -1,7 +1,7 @@
 ---
 title: 결제 대기 취소, 대기 목록 개선, 충전 내역, 계정 UI 개편
 type: 기능
-status: 구현 완료 (프론트 테스트 58개 통과 / 백엔드 테스트 로컬 실행 대기)
+status: 구현 반영 (테스트 실행 결과는 본문의 당시 기록 참조)
 date: 2026-10-16
 tags: [reservation, credit, waitlist, frontend, account-ui]
 related: [waitlist.md, outbox-kafka.md, notification-ui.md, pg-charge.md, reservation-concurrency.md]
@@ -15,7 +15,7 @@ related: [waitlist.md, outbox-kafka.md, notification-ui.md, pg-charge.md, reserv
 
 ## 0. 작업 범위 한눈에 보기 (AI·사람 공통 요약)
 
-브랜치는 `feat/notification-ui` 하나에서 진행했고 아직 커밋·푸시하지 않았다. 변경은 서로 독립된 다섯 묶음이며, 커밋은 묶음별로 나누는 것을 권장한다.
+작성 당시 `feat/notification-ui`에서 진행한 작업 기록이다. 아래 기능은 기능 동결 커밋 `d1a15ec`에 반영되어 있다. 본문의 테스트 수치와 실행 대기 표기는 당시 기록이며 이번 문서 갱신에서 새로 실행한 결과가 아니다. 작업 묶음은 아래 A~F와 같다.
 
 | # | 묶음 | 백엔드 | 프론트 | 문서 |
 | --- | --- | --- | --- | --- |
@@ -184,4 +184,4 @@ related: [waitlist.md, outbox-kafka.md, notification-ui.md, pg-charge.md, reserv
   - Q. 왜 HELD 취소에 환불 로직이 없나요? A. HELD는 결제 전이라 차감된 크레딧이 없습니다. CONFIRMED 경로(환불·위약금·토큰 revoke)와 분리해 기존 경로를 건드리지 않았습니다.
   - Q. 충전 내역에 PENDING을 뺀 이유는? A. 주문만 만들고 결제하지 않은 시도라 사용자에게 의미가 없어서입니다.
   - Q. 약관 버튼 버그의 원인은? A. 토스 위젯이 기본 동의 상태를 이벤트로 알려 주지 않아 앱 상태와 화면이 어긋났습니다. 초기 상태를 한 번 반영하고, 최종 동의 검증은 토스 결제 요청에 맡겼습니다.
-- **숫자·근거 한 줄:** 프론트 테스트 58개 통과(신규 3), 백엔드는 신규 테스트 작성 후 로컬 실행 대기.
+- **검증 근거:** §5의 당시 실행 기록을 참조한다. 해당 기록은 기능 동결 기준의 새 실행 결과가 아니며, 이번 문서 갱신에서 테스트 수치를 재검증하지 않았다.

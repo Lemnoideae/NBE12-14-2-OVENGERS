@@ -1,5 +1,9 @@
 # 예약 대기열과 빈자리 알림
 
+> **구현 기준: 기능 동결 커밋 `d1a15ec` / 문서 갱신일: 2026-10-21**. 기존 단계별 계획·실행 수치는 당시 기록으로 보존한다. 이번 확인은 코드·설정 대조이며 운영 PG·Kafka 재검증을 뜻하지 않는다.
+
+> **과거 보고서 참조 안내**: 이 문서에서 언급하는 `docs/lab/notes/`의 보고서 원문은 기능 동결 커밋 `d1a15ec`에 포함되어 있지 않다. 보고서 이름과 당시 결과는 기존 문서의 기록으로 보존하며, 이번 갱신에서 원문을 확인하거나 테스트를 재실행했다는 뜻이 아니다. 해당 보고서 이름에는 링크를 제공하지 않는다.
+
 > 상태: 10/21 범위 구현·문서화 완료 (1~5단계). 작성: 2026-10-06. 열린 질문 결정 반영: 2026-10-06. 10/21 범위 결정 반영: 2026-10-15. 4단계(알림)·5단계(문서) 반영: 2026-10-16.
 
 ## 한 줄 요약
@@ -106,18 +110,18 @@
 
 #### 1단계 대기 신청 (2026-10-15, 구현 세션 / 검증은 별도 세션 필요)
 
-보고 전문은 [lab/notes/waitlist-outbox/step-1.md](../lab/notes/waitlist-outbox/step-1.md)에 있다. 구현 범위는 `waitlist_entry`(Flyway V17), `POST /api/v1/waitlist`, `DELETE /api/v1/waitlist/{id}`, `GET /api/v1/waitlist/me`이고 Kafka·Outbox·알림은 포함하지 않는다.
+당시 보고서 참조는 step-1.md였다. 구현 범위는 `waitlist_entry`(Flyway V17), `POST /api/v1/waitlist`, `DELETE /api/v1/waitlist/{id}`, `GET /api/v1/waitlist/me`이고 Kafka·Outbox·알림은 포함하지 않는다.
 
 - `WaitlistServiceIntegrationTest`(Testcontainers MySQL 8.4) 통과(1단계 19건 → fix-1·fix-2를 거쳐 32건). 구간 전부 비면 `WAITLIST_NOT_NEEDED`, 일부 점유면 성공, 같은 공간·겹치는 시간의 본인 **만료되지 않은** `HELD`/`CONFIRMED`/`IN_USE` 예약은 `WAITLIST_ALREADY_HOLDING`, 다른 공간이나 겹치지 않는 시간은 성공, UNIQUE 중복은 `WAITLIST_DUPLICATE`, 활성 4건째는 `WAITLIST_LIMIT_EXCEEDED`, 타인 대기 취소는 `FORBIDDEN_NOT_OWNER`, 정지는 `ACCOUNT_INACTIVE`·탈퇴는 `ACCOUNT_WITHDRAWN`, 신청 순서는 겹치는 선행 `WAITING` 건수 + 1이며 취소되면 당겨진다.
 - `WaitlistControllerTest`(`@WebMvcTest`) 6건 통과. 201/204/200, `VALIDATION_FAILED`(400), 토큰 없음 401, `FORBIDDEN_NOT_OWNER` 전파.
 - 전체 회귀: `./gradlew cleanTest test` → fix-2까지 반영한 현재 **87 클래스 697 tests, 실패 0, 에러 0**(1단계 시점은 85 클래스 679 tests였다). 기존 예약 동시성·취소·스케줄러 테스트는 그대로 통과했고 예약 경로 코드는 변경하지 않았다.
 - 인덱스: `reservation` 12,000행 + `ANALYZE TABLE` 기준 EXPLAIN에서 본인 겹침 조회가 검사 행 1,240 → **64**로 줄어, V17에 `(member_id, space_id, status, start_time)` 인덱스를 추가한 판단이 맞음을 확인했다(수치·쿼리는 보고서 6절).
 - 동시 신청 경계 테스트는 `WaitlistApplyConcurrencyTest` 1건으로 **실측했다**. 같은 회원·같은 공간·같은 구간에 `apply`를 **5스레드 동시 호출**하면 성공이 정확히 1건, 나머지 4건은 `WAITLIST_DUPLICATE`이고, `waitlist_entry`의 `WAITING` 행과 `active IS NOT NULL` 행이 각각 1건이다 — 판정자는 `UNIQUE(member_id, space_id, start_time, end_time, active)` 하나다. 반면 점유 검사–INSERT 경합과 활성 3건 초과는 "수용"으로 정한 결정([plans/waitlist-outbox](../plans/waitlist-outbox/01-waitlist-rules.md) §1)이라 테스트하지 않는다(돈도 슬롯도 움직이지 않는 경로다).
-- 위 두 건(본인 점유 검사가 만료된 `HELD`를 점유로 본 것, UNIQUE에 status 성격의 칸이 없어 취소 후 같은 구간 재신청이 막힌 것)은 같은 날 fix-1에서 해결했다([보고서](../lab/notes/waitlist-outbox/step-1-fix-1.md)). 점유의 기준을 예약 경로와 한 질의로 맞춰(`CONFIRMED`·`IN_USE`이거나 만료 전 `HELD`) 만료된 홀드는 점유로 보지 않고, `waitlist_entry`에 `active`(WAITING이면 1, 아니면 NULL)를 두고 UNIQUE를 `(member_id, space_id, start_time, end_time, active)`로 바꿔 취소 이력을 남기면서 재신청을 허용한다. 본인 점유 차단에서 `COMPLETED`는 제외하되 슬롯 점유 판정에는 포함한다(체크아웃이 슬롯을 지우지 않으므로).
+- 위 두 건(본인 점유 검사가 만료된 `HELD`를 점유로 본 것, UNIQUE에 status 성격의 칸이 없어 취소 후 같은 구간 재신청이 막힌 것)은 같은 날 fix-1에서 해결했다(보고서). 점유의 기준을 예약 경로와 한 질의로 맞춰(`CONFIRMED`·`IN_USE`이거나 만료 전 `HELD`) 만료된 홀드는 점유로 보지 않고, `waitlist_entry`에 `active`(WAITING이면 1, 아니면 NULL)를 두고 UNIQUE를 `(member_id, space_id, start_time, end_time, active)`로 바꿔 취소 이력을 남기면서 재신청을 허용한다. 본인 점유 차단에서 `COMPLETED`는 제외하되 슬롯 점유 판정에는 포함한다(체크아웃이 슬롯을 지우지 않으므로).
 
 #### fix-1 (2026-10-15) — 점유 기준 통일과 재신청 허용
 
-[보고서](../lab/notes/waitlist-outbox/step-1-fix-1.md). 1단계 보고서가 리뷰 대상으로 남긴 두 건을 고쳤다.
+보고서. 1단계 보고서가 리뷰 대상으로 남긴 두 건을 고쳤다.
 
 - **만료된 `HELD`는 점유가 아니다.** 본인 점유 검사를 `existsOccupyingByMemberAndSpace`로 바꿔 조건을 슬롯 점유 조회와 같은 모양(`status IN (CONFIRMED, IN_USE) OR (status = HELD AND :now < hold_expires_at)`)으로 맞췄다. 판정 기준이 두 군데서 달라 "구간은 비었는데 내 만료된 홀드 때문에 신청이 막히는" 엇갈림이 있었다.
 - **취소 후 같은 구간 재신청 허용.** `active`(WAITING이면 1, 아니면 NULL) 칸을 만들고 UNIQUE를 `(member_id, space_id, start_time, end_time, active)`로 바꿨다. 취소는 행을 지우지 않고 `CANCELLED` + `active=NULL`로 두어 이력이 남는다.
@@ -125,7 +129,7 @@
 
 #### fix-2 (2026-10-15) — 검증 지적 처리
 
-[검증 보고](../lab/notes/waitlist-outbox/step-1-review.md) / [수정 보고](../lab/notes/waitlist-outbox/step-1-fix-2.md).
+검증 보고 / 수정 보고.
 
 - **활성 대기의 기준을 `status = WAITING AND start_time > now`로 정의**하고 3건 제한·신청 순서·`GET /waitlist/me` 세 곳에 같이 적용했다. `EXPIRED` 전이가 4단계 범위라 구간이 지난 WAITING 행이 남는데, 그 행이 제한을 영구히 차지하면 **미래의 다른 구간을 신청할 수 없었다**. 종료 시각이 아니라 시작 시각을 기준으로 삼은 이유는 4단계 알림 조건과 `ReservationTimePolicy`가 시작 시각을 보기 때문이다.
 - **동시 신청을 실측**했다(위 검증 결과의 `WaitlistApplyConcurrencyTest`). fix-1이 글로만 단정했던 "UNIQUE가 한 건만 통과시킨다"가 확인됐다.
@@ -135,13 +139,13 @@
 
 #### 4단계 알림 대상 선정과 알림 조회 (2026-10-16)
 
-보고 전문은 [lab/notes/waitlist-outbox/step-4.md](../lab/notes/waitlist-outbox/step-4.md), 검증 보고는 [step-4-review.md](../lab/notes/waitlist-outbox/step-4-review.md).
+보고 전문은 lab/notes/waitlist-outbox/step-4.md, 검증 보고는 step-4-review.md.
 
 - **전체 회귀:** `./gradlew cleanTest test` → **814 tests, 실패 0, 오류 0, 건너뜀 11**(건너뜀 11건은 모두 기존 `V2SecurityRedTest`의 `@Disabled`). 4단계 직전 768 tests(3단계 시점)에서 알림 관련 테스트가 추가됐다. 취소·직접 예약 동시성 회귀 테스트(`ReservationCancelConcurrencyTest` 2, `ReservationCancelConcurrencyIntegrationTest` 5, `AdminReservationConcurrencyIntegrationTest` 13)와 `OutboxRecordIntegrationTest` 13건은 그대로 통과했다.
 - **알림 대상 선정(`SlotReleasedHandlerTest`, 실제 MySQL):** 구간 전체가 비면 대기자 전원에게 알림, 일부만 비면 제외, 해제 뒤 재점유된(만료 전 `HELD`) 슬롯은 제외·만료된 `HELD`는 알림, 정지·탈퇴·`CANCELLED` 제외, 시작이 지난 항목 제외, 시작 시각이 `now`와 정확히 같으면 제외(핸들러에 고정 Clock을 주입했고, 후보 쿼리 `>`를 `>=`로 바꾸면 실패함을 확인), 본인 `CONFIRMED`·만료 전 `HELD` 겹침 제외, 다른 공간·겹치지 않는 본인 예약은 알림, 대기 구간이 해제 구간보다 넓거나 일부만 겹쳐도 전체가 비면 알림, 알림 문구에 "선착순·보장" 포함. 핸들러의 세 조건(구간 비었는지·본인 점유·회원 상태)을 각각 제거하는 변이 검사에서 해당 테스트만 정확히 실패했다.
 - **갱신 유실(`WaitlistEntryLostUpdateTest`):** 래치로 순서를 고정한 인터리빙(A가 읽음 → B가 알림 시각 기록·커밋 → A가 취소 커밋)에서 `@DynamicUpdate` 없이는 `last_notified_at`이 null로 되돌아가 실패하고, 적용 뒤 보존된다. 취소된 행에는 `markNotified`가 0건 갱신한다.
 - **알림 조회:** 내 알림만·최신순·페이징, 안 읽은 개수는 본인 `read_at IS NULL`만(`NotificationQueryIntegrationTest`), 토큰의 회원 id로만 조회되고 토큰이 없으면 401(`NotificationControllerTest`).
-- **로컬 E2E (실제 Kafka, KRaft 단일 노드):** 대기 신청 후 점유자 취소 → outbox `PUBLISHED` → 컨슈머 → 알림 1건 → `GET /notifications`와 `unread-count`에 대기자에게만 보임(점유자는 0건). 알림 뒤 두 사람이 같은 구간을 동시 예약하면 한 명은 201(`HELD`), 한 명은 409 `RESERVATION_SLOT_CONFLICT`이고 슬롯은 한 예약 몫(30분 슬롯 2개)만 남는다. 홀드 만료 경로(`HOLD_EXPIRED`)로 풀린 슬롯을 다른 사람이 곧바로 재점유하면 대기자에게 알림이 가지 않는다. 증거와 한계는 [step-5.md](../lab/notes/waitlist-outbox/step-5.md).
+- **로컬 E2E (실제 Kafka, KRaft 단일 노드):** 대기 신청 후 점유자 취소 → outbox `PUBLISHED` → 컨슈머 → 알림 1건 → `GET /notifications`와 `unread-count`에 대기자에게만 보임(점유자는 0건). 알림 뒤 두 사람이 같은 구간을 동시 예약하면 한 명은 201(`HELD`), 한 명은 409 `RESERVATION_SLOT_CONFLICT`이고 슬롯은 한 예약 몫(30분 슬롯 2개)만 남는다. 홀드 만료 경로(`HOLD_EXPIRED`)로 풀린 슬롯을 다른 사람이 곧바로 재점유하면 대기자에게 알림이 가지 않는다. 증거와 한계는 step-5.md.
 
 ## 6. 한계와 재검토 조건
 
@@ -151,14 +155,14 @@
 - **대기 항목은 공간·구간 단위이고 알림은 1종(`SLOT_AVAILABLE`)이다.** 우선순위(등급), 부분 매칭, SSE·메일은 범위 밖이다.
 - **취소 직후에도 알림이 한 건 생길 수 있다**: 컨슈머가 후보를 읽은 뒤 사용자의 대기 취소가 커밋되면 알림이 저장된다. 알림은 힌트이고 최종 판정은 슬롯 UNIQUE라 허용하며, 후보 행에 락을 걸지 않는 것은 3단계의 "락 대기 없음" 원칙 때문이다([outbox-kafka](outbox-kafka.md) 컨슈머 결정의 한계).
 - **`GET /notifications`의 `sort` 파라미터가 "최신순 고정"을 깰 수 있다(3차):** 컨트롤러가 `Pageable`을 그대로 받아 `?sort=createdAt,asc`가 메서드 이름의 정렬(`id` 내림차순)에 합쳐질 수 있고, 존재하지 않는 속성은 예외로 이어질 수 있다. 기존 `InquiryController`도 같은 패턴이라 프로젝트 관례와는 같다. 정렬 파라미터를 무시하거나 허용 목록으로 제한할지는 3차에서 정한다.
-- **읽음 처리가 없다.** `notification.read_at`은 항상 NULL이고 안 읽은 개수는 줄지 않는다. SSE·메일과 함께 3차에서 정한다.
+- **읽음 처리는 후속 구현에 포함됐다.** `POST /notifications/read-all?upToId=...`는 본인의 미읽음 알림 중 상한 이하를 처리한다. 목록 UI·배지 갱신과 한계는 [알림 UI 결정](notification-ui.md)을 따른다. SSE·메일은 후속 범위다.
 - **알림 문구에 공간 이름을 그대로 넣는다.** 이름이 이미 `[샘플] …`처럼 대괄호로 시작하면 `[[샘플] …]`로 보인다(로컬 E2E에서 확인, 표시만의 문제).
 - **재검토 트리거**: ① 다중 인스턴스 배포 ② 대기 신청량이 공간당 수십 건 규모 ③ 알림 → 예약 성공률이 낮게 측정될 때 ④ 자동 선점권을 3차에서 구현할 때.
 
 ### 열린 질문
 
 - (해소, 2026-10-15) 건너뛴 정지 회원의 대기 항목은 대기로 유지한다.
-- (해소, 2026-10-16) 같은 대기 항목에 이벤트마다 알림이 쌓이는 것은 허용하고 쓰로틀은 3차로 미룬다. 읽음 처리·SSE·메일도 3차다.
+- (해소, 2026-10-16) 같은 대기 항목에 이벤트마다 알림이 쌓이는 것은 허용하고 쓰로틀은 3차로 미룬다. 당시 읽음 처리·SSE·메일을 3차로 분류했으나, 읽음은 이후 [알림 UI 결정](notification-ui.md)으로 구현됐다. SSE·메일은 후속 범위다.
 
 ## 면접·발표용 정리 (구현 후)
 
@@ -177,5 +181,5 @@
   - Q. 취소하자마자 알림이 가는 경합은 없나요?
     A. 컨슈머가 후보를 읽은 직후 취소가 커밋되면 한 건이 나갈 수 있다. 알림은 힌트이고 최종 판정은 슬롯 UNIQUE라 허용했고, 막으려면 락이 늘어 3단계의 "락 대기 없음" 원칙을 깨기 때문이다.
   - Q. 규모가 커지면 어떻게 바꾸겠습니까?
-    A. 후보 N명당 질의 약 3N+1회라 대기자가 수십 명이 넘으면 한 질의로 합치고, 알림 쓰로틀·읽음·SSE를 더하며, 다중 인스턴스에서는 relay를 분산 락이나 CDC로 바꾼다.
+    A. 후보 N명당 질의 약 3N+1회라 대기자가 수십 명이 넘으면 한 질의로 합치고, 알림 쓰로틀·SSE를 검토하며(상한 기반 일괄 읽음은 구현됨), 다중 인스턴스에서는 relay를 분산 락이나 CDC로 바꾼다.
 - **숫자·근거 한 줄:** 전체 814 tests·실패 0(건너뜀 11은 기존 `@Disabled`), 동시 신청 5스레드에서 활성 대기 1건, 같은 이벤트 4스레드 동시 처리에서 알림·처리 기록 각 1건, 본인 점유 조회는 12,000행 기준 검사 행 1,240 → 64.

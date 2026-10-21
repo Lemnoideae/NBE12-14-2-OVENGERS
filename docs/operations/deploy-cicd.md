@@ -1,6 +1,6 @@
 # 배포 및 CI/CD
 
-> 2026-09-25 기준. 3차(코틀린 마이그레이션) 프로젝트에서는 이 문서에 정리된 배포·CI/CD 구조를 그대로 유지하고, PG 연동·예약 대기열은 다음 사이클로 미룸.
+> **설정 기준: 기능 동결 커밋 `d1a15ec` / 문서 갱신일: 2026-10-21**. 해당 커밋의 `.github/workflows/backend-ci.yml`·`frontend-ci.yml` 기준이며, 이번 변경은 문서만 최신화한다. 기능 동결 기준은 유지한다. 아래 §4는 2026-09-25 당시 실행 기록이다. 설정 확인과 운영 배포 성공·기능 검증은 구분한다. PG·예약 대기 구현은 기준 커밋에 포함돼 있으며, 이번 문서 작업에서 운영 환경을 실행 검증하지 않았다.
 
 ## 1. 인프라 구성
 
@@ -15,13 +15,13 @@
 
 ## 2. 백엔드 배포 방식
 
-- **jar 직접 실행 방식** 채택 (Docker 미사용 — 팀의 docker-compose는 로컬 DB 전용). systemd로 애플리케이션 자체를 관리하지 않고 `nohup`으로 백그라운드 실행.
-- 저장소 경로: `/home/ubuntu/NBE12-14-2-OVENGERS/backend`
-- 실행 jar: `build/libs/slotkey-0.0.1-SNAPSHOT.jar`
+- **JAR 배포 + systemd 관리**: self-hosted runner가 체크아웃한 `backend`에서 빌드한다. 워크플로는 Docker 이미지로 배포하지 않는다.
+- 빌드 산출물: `build/libs/slotkey-0.0.1-SNAPSHOT.jar`
+- 설치 JAR: `/home/ubuntu/slotkey/slotkey.jar`. 설치 후 `sudo systemctl restart slotkey`를 실행한다.
 - 실행 포트: `8080` (커스텀 `server.port` 설정 없음, 기본값)
-- 실행 프로필: `--spring.profiles.active=prod`
+- 실행 프로필: 과거 운영 기록은 `prod`. 현재 워크플로에는 Java 실행 인자가 없으므로 실제 프로필은 서버의 systemd unit·환경 설정을 별도로 확인해야 한다.
 - **알려진 제약**: EC2가 저사양이라 `./gradlew build` 중 테스트 태스크가 OOM(exit 137)으로 killed되는 문제가 있었음 → EC2에서 직접 빌드할 때는 `./gradlew build -x test`로 테스트 스킵.
-- **Actuator 미적용**: 헬스체크용 `/actuator/health` 엔드포인트가 없음. 배포 파이프라인의 헬스체크는 HTTP 응답 코드가 오는지(`000`이 아닌지)만 확인하는 방식으로 대체.
+- **현재 기동 확인**: `systemctl is-active`와 이번 재시작 이후 journal의 `Started ... in ... seconds` 로그를 확인한다. HTTP 기능 응답이나 DB·외부 서비스 정상 동작을 검증하는 절차는 아니다.
 
 ## 3. CI/CD (GitHub Actions)
 
@@ -52,7 +52,7 @@ on:
 - `runs-on: self-hosted` — EC2 인스턴스 자체에 등록한 GitHub Actions self-hosted runner에서 실행
 - `needs: build` — build job 성공 시에만 실행
 - 조건: `dev` 브랜치로의 push 이벤트일 때만 실행 (PR에서는 스킵)
-- 단계: 체크아웃 → JDK 21 설정 → `./gradlew build -x test`(빌드 job에서 이미 테스트 통과했으므로 재실행 스킵) → 기존 프로세스 종료(`pkill -f 'slotkey-0.0.1-SNAPSHOT.jar'`) → `nohup java -jar ... &`로 재기동 → HTTP 응답 코드 기반 헬스체크(최대 10회, 5초 간격 재시도)
+- 단계: 체크아웃 → JDK 21 설정 → `./gradlew clean build -x test` → `install -D -m 644`로 `/home/ubuntu/slotkey/slotkey.jar` 설치 → 재시작 기준 시각 기록 → `sudo systemctl restart slotkey` → 서비스 활성 상태와 기준 시각 이후 기동 완료 로그 확인(최대 24회, 5초 간격). 서비스 비활성 또는 제한 시간 내 기동 로그 미확인 시 실패한다.
 
 ### 3-4. self-hosted runner를 선택한 이유
 
@@ -75,17 +75,17 @@ GitHub Actions에서 EC2로 배포하는 방법은 크게 두 가지:
 파일 위치: `.github/workflows/frontend-ci.yml`
 
 - 이전에는 `STATIC_EXPORT=true npm run build` → S3 업로드 → CloudFront invalidation을 매번 콘솔/CLI에서 수동으로 했음. 이제 `dev` push 시 자동으로 실행됨.
-- 트리거는 백엔드와 동일하게 `pull_request: [dev, main]`(빌드 검증만) / `push: [dev]`(빌드+배포), 다만 `paths: frontend/**`로 제한해 백엔드만 바뀐 PR·push에서는 실행되지 않음.
+- 트리거는 백엔드와 동일하게 `pull_request: [dev, main]`(빌드 검증만) / `push: [dev]`(빌드+배포), 경로 필터는 `frontend/**`와 `.github/workflows/frontend-ci.yml`이다. 프론트 코드 또는 해당 워크플로 변경 시 실행하며, 백엔드만 바뀐 PR·push에서는 실행되지 않음.
 - `build` job (`ubuntu-latest`): `npm ci` → `npm run lint` → `tsc --noEmit` → `node --test tests/*.cjs` → `STATIC_EXPORT=true npm run build`(실제 배포 빌드와 동일한 조건으로 빌드 자체가 되는지 검증).
 - `deploy` job: `build` 성공 + `dev` push일 때만, `ubuntu-latest`에서 실행(백엔드와 달리 self-hosted runner 불필요 — EC2에 접속할 필요 없이 AWS API만 호출하면 되므로).
   1. `STATIC_EXPORT=true npm run build`로 `frontend/out/` 생성
   2. `aws-actions/configure-aws-credentials`로 IAM 사용자 `slotkey-deploy`의 키를 사용해 인증
   3. `aws s3 sync out/ s3://slotkey-web-page --delete`
   4. `aws cloudfront create-invalidation --distribution-id E3PEHWSJNM0BPV --paths "/*"`
-- **필요한 GitHub Secrets** (저장소 Settings → Secrets and variables → Actions에 등록 필요, 아직 미등록 상태):
+- **워크플로가 참조하는 GitHub Secrets** (실제 값·등록 상태는 이번 문서 작업에서 조회하지 않음):
   - `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`: IAM 사용자 `slotkey-deploy`의 CLI 키
   - `AWS_REGION`: S3 버킷 리전(예: `ap-northeast-2`)
-  - 시크릿이 없으면 `deploy` job의 `Configure AWS credentials` 단계에서 실패함.
+  - 프론트 배포 빌드는 Repository Variable `NEXT_PUBLIC_TOSS_PAYMENTS_CLIENT_KEY`도 참조한다. 실제 값은 문서에 기록하지 않는다.
 
 ## 4. 검증 기록 (2026-09-25)
 
@@ -98,4 +98,4 @@ GitHub Actions에서 EC2로 배포하는 방법은 크게 두 가지:
 - Elastic IP 미적용 상태 — EC2 재시작 시 IP가 바뀔 수 있음(현재 self-hosted runner 구조라 CI/CD 자체는 영향 없지만, 프론트/문서에 박아둔 IP 값은 갱신 필요)
 - Actuator 도입 후 정식 `/actuator/health` 기반 헬스체크로 전환
 - `main` 브랜치 배포 전환 시 워크플로 조건 수정
-- PG 연동, 예약 대기열은 별도 사이클에서 진행 예정
+- PG·예약 대기 구현은 현재 소스에 존재한다. 운영 활성화 및 외부 연동 검증 상태는 별도 실행 기록으로 확인한다.
